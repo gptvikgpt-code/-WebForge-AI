@@ -94,6 +94,8 @@ class MainActivity : ComponentActivity() {
   window.statusBarColor = android.graphics.Color.TRANSPARENT
   window.navigationBarColor = android.graphics.Color.TRANSPARENT
   window.setBackgroundDrawableResource(R.drawable.neural_background)
+  // Keep the neural wallpaper subtle on every screen so text and controls stay readable.
+  window.background?.alpha = 26 // approximately 10% opacity
   if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
    window.isStatusBarContrastEnforced = false
    window.isNavigationBarContrastEnforced = false
@@ -763,7 +765,7 @@ private fun ChatApp() {
     Image(
      painter = painterResource(id = R.drawable.neural_background),
      contentDescription = null,
-     modifier = Modifier.fillMaxSize().alpha(0.38f),
+     modifier = Modifier.fillMaxSize().alpha(0.10f),
      contentScale = ContentScale.Crop
     )
     CircuitOverlay(Modifier.fillMaxSize())
