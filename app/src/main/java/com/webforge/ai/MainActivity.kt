@@ -67,8 +67,9 @@ private fun ChatApp() {
  var messages by remember { mutableStateOf(readMessages(prefs)) }
  var memory by remember { mutableStateOf(readMemory(prefs)) }
  var input by remember { mutableStateOf("") }
- var status by remember { mutableStateOf(if (model != null) "Модель найдена. Запусти её в настройках." else "Установи локальную модель в настройках.") }
+ var status by remember { mutableStateOf(if (model != null) "Модель найдена. Автоматически запускаю…" else "Установи локальную модель в настройках.") }
  var busy by remember { mutableStateOf(false) }
+ var startingModel by remember { mutableStateOf(false) }
  var settings by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
@@ -100,9 +101,22 @@ private fun ChatApp() {
   }
  }
  DisposableEffect(ctx) {
-  val speaker = TextToSpeech(ctx) { result -> if (result == TextToSpeech.SUCCESS) tts?.language = Locale("ru", "RU") }
+  val speaker = TextToSpeech(ctx)
   tts = speaker
   onDispose { try { speaker.stop(); speaker.shutdown() } catch (_: Exception) {}; tts = null }
+ }
+ LaunchedEffect(tts) {
+  tts?.let { speaker ->
+   val result = speaker.setLanguage(Locale("ru", "RU"))
+   if (result >= TextToSpeech.LANG_AVAILABLE) {
+    speaker.setSpeechRate(0.91f)
+    speaker.setPitch(0.86f)
+    val russianVoice = speaker.voices
+     ?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }
+     ?.maxByOrNull { it.quality }
+    if (russianVoice != null) speaker.voice = russianVoice
+   }
+  }
  }
  DisposableEffect(Unit) {
   onDispose {
@@ -181,7 +195,7 @@ private fun ChatApp() {
   status = if (fact != null) "Записал в память • думаю…" else "Думаю локально…"
   task = scope.launch(dispatcher) {
    try {
-    val recent = messages.dropLast(1).takeLast(8).joinToString("\n") { (if (it.user) "Ты: " else "ИИ: ") + it.text.take(900) }
+    val recent = messages.dropLast(1).takeLast(4).joinToString("\n") { (if (it.user) "Ты: " else "ИИ: ") + it.text.take(600) }
     val prompt = "Локальная память пользователя:\n" + memory.joinToString("\n") { "- $it" } +
       "\n\nНедавний разговор:\n$recent\n\nСообщение пользователя:\n$text\n\nОтвечай на русском, учитывай память и контекст. Не выдумывай факты."
     val result = StringBuilder()
@@ -200,8 +214,37 @@ private fun ChatApp() {
  }
  submitVoice[0] = { send() }
 
+ // Automatically initialize a model already stored in the app's private files.
+ LaunchedEffect(model?.absolutePath) {
+  if (model != null && chat == null && !startingModel) {
+   startingModel = true
+   busy = true
+   status = "Автоматически запускаю локальную модель…"
+   val file = model!!
+   scope.launch(dispatcher) {
+    var created: Engine? = null
+    try {
+     val gpu = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
+     created = try { gpu.initialize(); gpu } catch (_: Exception) {
+      try { gpu.close() } catch (_: Exception) {}
+      Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+     }
+     val convo = created.createConversation(ConversationConfig(
+      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      samplerConfig = SamplerConfig(topK = 20, topP = 0.90, temperature = 0.62)
+     ))
+     chat?.close(); engine?.close(); engine = created; chat = convo
+     withContext(Dispatchers.Main) { status = "ИИ запущен локально"; busy = false; startingModel = false }
+    } catch (e: Exception) {
+     try { created?.close() } catch (_: Exception) {}
+     withContext(Dispatchers.Main) { status = "Не удалось запустить модель: ${e.message}"; busy = false; startingModel = false }
+    }
+   }
+  }
+ }
+
  Scaffold(
-  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(if (chat != null) "На устройстве • активен" else "Модель не запущена", style = MaterialTheme.typography.labelSmall) } }, actions = {
+  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(when { chat != null -> "На устройстве • активен"; startingModel -> "Запуск локальной модели…"; model != null -> "Модель найдена • готовлю запуск"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
    IconButton(onClick = { memoryDialog = true }) { Icon(Icons.Default.Memory, "Память") }
    IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
