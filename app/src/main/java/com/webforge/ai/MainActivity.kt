@@ -548,11 +548,19 @@ private fun ChatApp() {
     }
    }
   } else {
-   LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-    items(messages, key = { it.id }) { m ->
-     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.user) Arrangement.End else Arrangement.Start) {
-      Surface(color = if (m.user) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp), modifier = Modifier.widthIn(max = 330.dp)) {
-       Text(m.text, Modifier.padding(13.dp), color = if (m.user) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+   Box(Modifier.fillMaxSize().padding(pad)) {
+    Image(
+     painter = painterResource(id = R.drawable.ic_launcher),
+     contentDescription = null,
+     modifier = Modifier.fillMaxSize().padding(18.dp).alpha(0.10f),
+     contentScale = ContentScale.Fit
+    )
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+     items(messages, key = { it.id }) { m ->
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.user) Arrangement.End else Arrangement.Start) {
+       Surface(color = if (m.user) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.94f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f), shape = RoundedCornerShape(18.dp), modifier = Modifier.widthIn(max = 330.dp)) {
+        Text(m.text, Modifier.padding(13.dp), color = if (m.user) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+       }
       }
      }
     }
