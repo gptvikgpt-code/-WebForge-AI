@@ -735,7 +735,7 @@ private fun ChatApp() {
   } else if (messages.isEmpty()) {
    Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
     Image(
-     painter = painterResource(id = R.drawable.ic_launcher),
+     painter = painterResource(id = R.drawable.neural_background),
      contentDescription = null,
      modifier = Modifier.fillMaxSize().alpha(0.38f),
      contentScale = ContentScale.Crop
@@ -751,10 +751,10 @@ private fun ChatApp() {
   } else {
    Box(Modifier.fillMaxSize().padding(pad)) {
     Image(
-     painter = painterResource(id = R.drawable.ic_launcher),
+     painter = painterResource(id = R.drawable.neural_background),
      contentDescription = null,
      modifier = Modifier.fillMaxSize().padding(18.dp).alpha(0.10f),
-     contentScale = ContentScale.Fit,
+     contentScale = ContentScale.Crop,
      colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(topicBrainColors[topicColorKey] ?: topicBrainColors.getValue("default"))
     )
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
