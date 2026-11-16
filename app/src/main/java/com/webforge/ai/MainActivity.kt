@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Keyboard
@@ -61,6 +62,7 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 private data class Msg(val id: Long, val text: String, val user: Boolean)
+private data class ChatThread(val id: String, val title: String, val messages: List<Msg>, val color: String)
 
 private val topicBrainColors = mapOf(
  "tech" to Color(0xFF35CFFF),
@@ -143,8 +145,10 @@ private fun ChatApp() {
  var smartModel by remember { mutableStateOf(File(ctx.filesDir, "webforge-model-4b.litertlm").takeIf { it.exists() }) }
  var engine by remember { mutableStateOf<Engine?>(null) }
  var chat by remember { mutableStateOf<Conversation?>(null) }
- var messages by remember { mutableStateOf(readMessages(prefs)) }
- var topicColorKey by remember { mutableStateOf(prefs.getString("topic_color", "default") ?: "default") }
+ var threads by remember { mutableStateOf(readThreads(prefs)) }
+ var activeThreadId by remember { mutableStateOf(prefs.getString("active_thread_id", null)?.takeIf { id -> threads.any { it.id == id } } ?: threads.first().id) }
+ var messages by remember { mutableStateOf(threads.firstOrNull { it.id == activeThreadId }?.messages ?: readMessages(prefs)) }
+ var topicColorKey by remember { mutableStateOf(threads.firstOrNull { it.id == activeThreadId }?.color ?: prefs.getString("topic_color", "default") ?: "default") }
  var memory by remember { mutableStateOf(readMemory(prefs)) }
  var input by remember { mutableStateOf("") }
  var status by remember { mutableStateOf(if (model != null) "Модель найдена. Автоматически запускаю…" else "Установи локальную модель в настройках.") }
@@ -153,6 +157,7 @@ private fun ChatApp() {
  var settings by remember { mutableStateOf(false) }
  var clearCacheDialog by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
+ var chatListDialog by remember { mutableStateOf(false) }
  var selectedTab by remember { mutableStateOf("chats") }
  var photoUri by remember { mutableStateOf<Uri?>(null) }
  var photoResult by remember { mutableStateOf("Выбери фотографию для локального анализа.") }
@@ -230,9 +235,51 @@ private fun ChatApp() {
  }
 
  fun saveChat() {
+  val current = ChatThread(activeThreadId, messages.firstOrNull { it.user }?.text?.replace("\n", " ")?.take(34)?.ifBlank { "Новый чат" } ?: "Новый чат", messages.takeLast(300), topicColorKey)
+  threads = threads.filterNot { it.id == activeThreadId } + current
   val a = JSONArray()
-  messages.takeLast(300).forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("user", it.user)) }
-  prefs.edit().putString("messages", a.toString()).apply()
+  current.messages.forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("user", it.user)) }
+  prefs.edit().putString("messages", a.toString()).putString("topic_color", topicColorKey)
+   .putString("active_thread_id", activeThreadId).putString("chat_threads", writeThreads(threads)).apply()
+ }
+ fun createNewChat() {
+  if (busy) return
+  saveChat()
+  val id = java.util.UUID.randomUUID().toString()
+  threads = threads + ChatThread(id, "Новый чат", emptyList(), "default")
+  activeThreadId = id; messages = emptyList(); topicColorKey = "default"
+  prefs.edit().putString("active_thread_id", id).putString("topic_color", "default").apply()
+  val activeEngine = engine; val old = chat; chat = null; chatListDialog = false
+  if (activeEngine != null) {
+   busy = true
+   scope.launch(dispatcher) {
+    try { old?.close() } catch (_: Exception) {}
+    try {
+     val fresh = createLocalConversation(activeEngine, emptyList())
+     withContext(Dispatchers.Main) { chat = fresh; busy = false; status = "Новый независимый чат готов." }
+    } catch (e: Exception) { withContext(Dispatchers.Main) { busy = false; status = "Не удалось создать чат: ${e.message}" } }
+   }
+  } else status = "Создан новый чат. Запусти модель в разделе «Мозг»."
+  saveChat()
+ }
+ fun switchChat(id: String) {
+  if (busy || id == activeThreadId) { chatListDialog = false; return }
+  saveChat()
+  val target = threads.firstOrNull { it.id == id } ?: return
+  activeThreadId = target.id; messages = target.messages; topicColorKey = target.color
+  prefs.edit().putString("active_thread_id", id).putString("topic_color", target.color).apply()
+  chatListDialog = false
+  val activeEngine = engine; val old = chat; chat = null
+  if (activeEngine != null) {
+   busy = true
+   scope.launch(dispatcher) {
+    try { old?.close() } catch (_: Exception) {}
+    try {
+     val restored = createLocalConversation(activeEngine, target.messages)
+     withContext(Dispatchers.Main) { chat = restored; busy = false; status = "Открыт чат «${target.title}»." }
+    } catch (e: Exception) { withContext(Dispatchers.Main) { busy = false; status = "Не удалось открыть чат: ${e.message}" } }
+   }
+  } else status = "История открыта. Запусти модель в разделе «Мозг»."
  }
  fun saveMemory() { prefs.edit().putString("memory", JSONArray(memory).toString()).apply() }
  fun beginVoiceInput() {
@@ -455,7 +502,7 @@ private fun ChatApp() {
  }
 
  Scaffold(
-  topBar = { TopAppBar(title = { Column { Text("WebForge AI"); Text(when { chat != null -> "Локальный ИИ • активен"; startingModel -> "Запуск модели…"; model != null -> "Модель установлена"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
+  topBar = { TopAppBar(navigationIcon = { IconButton(onClick = { chatListDialog = true }) { Icon(Icons.Default.Menu, "Список чатов") } }, title = { Column { Text("WebForge AI"); Text(when { chat != null -> "Локальный ИИ • активен"; startingModel -> "Запуск модели…"; model != null -> "Модель установлена"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
    IconButton(onClick = { selectedTab = "brain"; settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
@@ -752,6 +799,23 @@ private fun ChatApp() {
   },
   dismissButton = { TextButton(onClick = { clearCacheDialog = false }) { Text("Отмена") } }
  )
+ if (chatListDialog) AlertDialog(
+  onDismissRequest = { chatListDialog = false },
+  title = { Text("Мои чаты • ${threads.size}") },
+  text = { Column(Modifier.heightIn(max = 440.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+   Button(onClick = { createNewChat() }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("＋ Новый чат") }
+   threads.asReversed().forEach { thread ->
+    TextButton(onClick = { switchChat(thread.id) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) {
+     Column(Modifier.fillMaxWidth()) {
+      Text(if (thread.id == activeThreadId) "● ${thread.title}" else thread.title, color = if (thread.id == activeThreadId) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+      Text("${thread.messages.count { it.user }} сообщений • ${thread.color}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+     }
+    }
+    HorizontalDivider()
+   }
+  } },
+  confirmButton = { TextButton(onClick = { chatListDialog = false }) { Text("Закрыть") } }
+ )
  if (memoryDialog) AlertDialog(
   onDismissRequest = { memoryDialog = false },
   title = { Text("Память на устройстве • ${memory.size}") },
@@ -792,6 +856,34 @@ private fun selectRelevantMemory(memory: List<String>, query: String, limit: Int
 private fun cleanModelText(source: String): String {
  return source.trim().replace("```", "").replace("\\times", "×")
   .replace("\\cdot", "·").replace("**", "").replace("*", "").replace("$", "").trim()
+}
+
+
+private fun readThreads(p: android.content.SharedPreferences): List<ChatThread> = try {
+ val a = JSONArray(p.getString("chat_threads", "[]"))
+ if (a.length() == 0) listOf(ChatThread("main", "Новый чат", readMessages(p), p.getString("topic_color", "default") ?: "default"))
+ else (0 until a.length()).map { i ->
+  val o = a.getJSONObject(i); val arr = o.optJSONArray("messages") ?: JSONArray()
+  val msgs = (0 until arr.length()).map { j -> val m = arr.getJSONObject(j); Msg(m.getLong("id"), m.getString("text"), m.getBoolean("user")) }
+  ChatThread(o.getString("id"), o.optString("title", "Новый чат"), msgs, o.optString("color", "default"))
+ }
+} catch (_: Exception) { listOf(ChatThread("main", "Новый чат", readMessages(p), p.getString("topic_color", "default") ?: "default")) }
+
+private fun writeThreads(threads: List<ChatThread>): String {
+ val all = JSONArray()
+ threads.forEach { thread ->
+  val msgs = JSONArray()
+  thread.messages.takeLast(300).forEach { msgs.put(JSONObject().put("id", it.id).put("text", it.text).put("user", it.user)) }
+  all.put(JSONObject().put("id", thread.id).put("title", thread.title).put("color", thread.color).put("messages", msgs))
+ }
+ return all.toString()
+}
+
+private fun createLocalConversation(engine: Engine, history: List<Msg>): Conversation {
+ val transcript = history.takeLast(14).joinToString("\n") { if (it.user) "Пользователь: ${it.text}" else "Ассистент: ${it.text}" }
+ val instruction = "Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики. Выполняй просьбу пользователя, не отвечай пустыми подтверждениями, не повторяй одну и ту же мысль. Отвечай естественным русским языком, будь точным и не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели." +
+  if (transcript.isNotBlank()) "\n\nКонтекст именно этой переписки (не смешивай его с другими чатами):\n" + transcript else ""
+ return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction), samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.62), maxOutputToken = 512))
 }
 
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
