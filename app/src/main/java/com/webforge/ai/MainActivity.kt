@@ -78,6 +78,8 @@ private fun ChatApp() {
  var settings by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
+ var activeWorkKind by remember { mutableStateOf("") }
+ var activeDownloadConnection by remember { mutableStateOf<HttpURLConnection?>(null) }
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
  var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
  var listening by remember { mutableStateOf(false) }
@@ -240,6 +242,7 @@ private fun ChatApp() {
   }
   busy = true
   status = if (desiredModel?.name == "webforge-model-4b.litertlm") "Переключаюсь на умную модель 4B…" else if (isComplex && smartModel == null) "Сложная задача • использую доступную модель 1.7B…" else "Думаю локально…"
+  activeWorkKind = "chat"
   task = scope.launch(dispatcher) {
    try {
     if (desiredModel != null && model?.absolutePath != desiredModel.absolutePath) {
@@ -295,7 +298,7 @@ private fun ChatApp() {
    } catch (e: CancellationException) {
     withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Генерация остановлена.", false); saveChat() }
    } catch (e: Exception) { withContext(Dispatchers.Main) { status = "Ошибка: ${e.message}" } }
-   finally { withContext(Dispatchers.Main) { busy = false; task = null } }
+   finally { withContext(Dispatchers.Main) { busy = false; task = null; activeWorkKind = "" } }
   }
  }
  submitVoice[0] = { send() }
@@ -357,9 +360,28 @@ private fun ChatApp() {
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
     LinearProgressIndicator(Modifier.weight(1f))
     TextButton(onClick = {
-     status = "Останавливаю генерацию…"
+     val kind = activeWorkKind
+     status = "Останавливаю процесс…"
      try { tts?.stop() } catch (_: Exception) {}
+     try { activeDownloadConnection?.disconnect() } catch (_: Exception) {}
      try { task?.cancel(CancellationException("Stopped by user")) } catch (_: Exception) {}
+     task = null
+     activeDownloadConnection = null
+     busy = false
+     downloadProgress = -1f
+     if (kind == "chat") {
+      val oldChat = chat
+      val oldEngine = engine
+      chat = null
+      engine = null
+      startingModel = false
+      scope.launch(Dispatchers.IO) {
+       try { oldChat?.close() } catch (_: Exception) {}
+       try { oldEngine?.close() } catch (_: Exception) {}
+      }
+      status = "Генерация остановлена. Для продолжения запусти ИИ в настройках."
+     } else status = "Загрузка остановлена. Уже скачанная часть сохранена."
+     activeWorkKind = ""
     }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
   } } }
@@ -375,13 +397,15 @@ private fun ChatApp() {
      modifier = Modifier.fillMaxWidth(),
      onClick = {
       busy = true; downloadProgress = -1f; status = "Подключаюсь к Hugging Face…"
-      scope.launch {
+      activeWorkKind = "download"
+      task = scope.launch {
        try {
         val target = withContext(Dispatchers.IO) {
          val finalFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm")
          downloadModelResumable(
           "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm?download=true",
-          partialModel
+          partialModel,
+          onConnection = { connection -> activeDownloadConnection = connection }
          ) { p -> withContext(Dispatchers.Main) { downloadProgress = p } }
          if (finalFile.exists()) finalFile.delete()
          check(partialModel.renameTo(finalFile)) { "Не удалось сохранить модель" }
@@ -389,7 +413,7 @@ private fun ChatApp() {
         }
         model = target; status = "Модель скачана. Нажми «Запустить ИИ»."
        } catch (e: Exception) { status = "Ошибка загрузки: ${e.message}. Частичный файл сохранён, повтори позже." }
-       finally { busy = false; downloadProgress = -1f }
+       finally { busy = false; downloadProgress = -1f; task = null; activeDownloadConnection = null; activeWorkKind = "" }
       }
      }
     ) { Text(if (partialModel.exists() && partialModel.length() > 0) "Продолжить загрузку модели" else "Скачать Qwen3 1.7B (≈932 МБ)") }
@@ -414,7 +438,8 @@ private fun ChatApp() {
          val finalFile = File(ctx.filesDir, "webforge-model-4b.litertlm")
          downloadModelResumable(
           "https://huggingface.co/litert-community/Qwen3-4B/resolve/main/qwen3_4b_mixed_int4.litertlm?download=true",
-          partialSmartModel
+          partialSmartModel,
+          onConnection = { connection -> activeDownloadConnection = connection }
          ) { p -> withContext(Dispatchers.Main) { downloadProgress = p } }
          if (finalFile.exists()) finalFile.delete()
          check(partialSmartModel.renameTo(finalFile)) { "Не удалось сохранить Qwen3 4B" }
@@ -548,7 +573,7 @@ private fun readMemory(p: android.content.SharedPreferences): List<String> = try
  val a = JSONArray(p.getString("memory", "[]")); (0 until a.length()).map { a.getString(it) }
 } catch (_: Exception) { emptyList() }
 
-private suspend fun downloadModelResumable(url: String, file: File, onProgress: suspend (Float) -> Unit) {
+private suspend fun downloadModelResumable(url: String, file: File, onConnection: (HttpURLConnection?) -> Unit = {}, onProgress: suspend (Float) -> Unit) {
  var attempt = 0
  var total = -1L
  var last: Exception? = null
@@ -562,7 +587,10 @@ private suspend fun downloadModelResumable(url: String, file: File, onProgress: 
     setRequestProperty("User-Agent", "WebForge-Local-Chat/1.0")
     if (offset > 0) setRequestProperty("Range", "bytes=${offset}-")
    }
+   onConnection(connection)
+   currentCoroutineContext().ensureActive()
    connection.connect()
+   currentCoroutineContext().ensureActive()
    val code = connection.responseCode
    if (offset > 0 && code == HttpURLConnection.HTTP_OK) {
     file.delete(); connection.disconnect(); connection = null; continue
@@ -577,7 +605,9 @@ private suspend fun downloadModelResumable(url: String, file: File, onProgress: 
      val buffer = ByteArray(256 * 1024)
      var got = if (code == 206 && offset > 0) offset else 0L
      while (true) {
+      currentCoroutineContext().ensureActive()
       val n = input.read(buffer); if (n < 0) break
+      currentCoroutineContext().ensureActive()
       out.write(buffer, 0, n); got += n
       if (total > 0) onProgress((got * 100f / total).coerceIn(0f, 99.9f))
      }
@@ -586,10 +616,12 @@ private suspend fun downloadModelResumable(url: String, file: File, onProgress: 
    if (total > 0 && file.length() != total) error("Загружено ${file.length()} из $total байт")
    if (file.length() >= 850L * 1024L * 1024L) { onProgress(100f); return }
    error("Файл меньше ожидаемого размера")
+  } catch (e: CancellationException) {
+   throw e
   } catch (e: Exception) {
    last = e
    if (attempt < 8) delay((attempt * 1500L).coerceAtMost(10000L))
-  } finally { connection?.disconnect() }
+  } finally { connection?.disconnect(); onConnection(null) }
  }
  throw java.io.IOException("Загрузка не завершена; сохранено ${file.length() / 1048576} МБ. ${last?.message ?: ""}", last)
 }
