@@ -191,6 +191,8 @@ private fun ChatApp() {
  var voiceMode by remember { mutableStateOf(prefs.getBoolean("voice_mode", false)) }
  var ttsReady by remember { mutableStateOf(false) }
  var pendingAnswerSpeech by remember { mutableStateOf<String?>(null) }
+ var pendingAutoListen by remember { mutableStateOf(false) }
+ var queuedVoiceSend by remember { mutableStateOf(false) }
  val currentVoiceMode by rememberUpdatedState(voiceMode)
  val currentBusy by rememberUpdatedState(busy)
  var pendingSpeechIntent by remember { mutableStateOf<Intent?>(null) }
@@ -383,7 +385,7 @@ private fun ChatApp() {
    speaker.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
     override fun onStart(utteranceId: String?) {}
     override fun onDone(utteranceId: String?) {
-     ctx.mainExecutor.execute { if (currentVoiceMode && !currentBusy) beginVoiceInput() }
+     ctx.mainExecutor.execute { if (currentVoiceMode) pendingAutoListen = true }
     }
     @Deprecated("Deprecated in Java")
     override fun onError(utteranceId: String?) {
@@ -395,6 +397,9 @@ private fun ChatApp() {
     if (currentVoiceMode) speaker.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
    }
   }
+ }
+ LaunchedEffect(busy, pendingAutoListen, voiceMode) {
+  if (!busy && pendingAutoListen && voiceMode) { pendingAutoListen = false; beginVoiceInput() }
  }
  fun send() {
   val text = input.trim()
@@ -508,7 +513,13 @@ private fun ChatApp() {
    finally { withContext(Dispatchers.Main) { busy = false; task = null; activeWorkKind = "" } }
   }
  }
- submitVoice[0] = { send() }
+ submitVoice[0] = {
+  if (busy) { queuedVoiceSend = true; status = "Речь распознана и сохранена. Отправлю после текущего ответа." }
+  else send()
+ }
+ LaunchedEffect(busy, queuedVoiceSend) {
+  if (!busy && queuedVoiceSend) { queuedVoiceSend = false; send() }
+ }
 
  // Automatically initialize a model already stored in the app's private files.
  LaunchedEffect(model?.absolutePath) {
@@ -548,38 +559,25 @@ private fun ChatApp() {
    }
   ) },
   bottomBar = { Surface(color = Color.Transparent, tonalElevation = 0.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
-   if (selectedTab == "chats") Row(verticalAlignment = Alignment.CenterVertically) {
-    if (voiceMode) {
-     Column(Modifier.weight(1f).padding(start = 12.dp)) {
-      Text(if (listening) "Слушаю тебя…" else if (busy) "Готовлю ответ…" else "Голосовой режим", style = MaterialTheme.typography.bodyLarge)
-      Text("Нажми клавиатуру, чтобы вернуться к тексту", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-     }
-    } else {
-     OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
-    }
+   if (selectedTab == "chats") Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (listening) "Слушаю тебя…" else "Напиши сообщение…") }, maxLines = 4, enabled = true, shape = RoundedCornerShape(22.dp))
     FilledIconButton(
      onClick = {
-      voiceMode = !voiceMode
-      prefs.edit().putBoolean("voice_mode", voiceMode).apply()
-      if (voiceMode) { tts?.stop(); beginVoiceInput() }
-      else { try { speechRecognizer?.cancel() } catch (_: Exception) {}; listening = false; tts?.stop(); status = "Текстовый режим" }
+      if (voiceMode) {
+       try { speechRecognizer?.cancel(); speechRecognizer?.destroy() } catch (_: Exception) {}
+       speechRecognizer = null; listening = false; pendingAutoListen = false; voiceMode = false
+       prefs.edit().putBoolean("voice_mode", false).apply()
+       try { tts?.stop() } catch (_: Exception) {}
+       status = "Голосовой режим выключен."
+      } else {
+       voiceMode = true; prefs.edit().putBoolean("voice_mode", true).apply(); beginVoiceInput()
+      }
      },
-     colors = IconButtonDefaults.filledIconButtonColors(
-      containerColor = Color(0xFF35383E),
-      contentColor = Color(0xFFD2D4D8),
-      disabledContainerColor = Color(0xFF292C31),
-      disabledContentColor = Color(0xFF777B82)
-     )
-    ) { Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.GraphicEq, if (voiceMode) "Переключить на текст" else "Переключить на голос") }
-    if (!voiceMode) FilledIconButton(
-     onClick = { send() },
-     enabled = input.isNotBlank() && !busy,
-     colors = IconButtonDefaults.filledIconButtonColors(
-      containerColor = Color(0xFF35383E),
-      contentColor = Color(0xFFD2D4D8),
-      disabledContainerColor = Color(0xFF292C31),
-      disabledContentColor = Color(0xFF777B82)
-     )
+     colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (listening) Color(0xFF50545C) else Color(0xFF35383E), contentColor = Color(0xFFD2D4D8), disabledContainerColor = Color(0xFF292C31), disabledContentColor = Color(0xFF777B82))
+    ) { Icon(if (voiceMode) Icons.Default.MicOff else Icons.Default.Mic, if (voiceMode) "Выключить голосовой режим" else "Начать голосовой ввод") }
+    FilledIconButton(
+     onClick = { send() }, enabled = input.isNotBlank() && !busy,
+     colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF35383E), contentColor = Color(0xFFD2D4D8), disabledContainerColor = Color(0xFF292C31), disabledContentColor = Color(0xFF777B82))
     ) { Icon(Icons.Default.Send, "Отправить") }
    }
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -942,7 +940,7 @@ private fun createLocalConversation(engine: Engine, history: List<Msg>): Convers
  val transcript = history.takeLast(14).joinToString("\n") { if (it.user) "Пользователь: ${it.text}" else "Ассистент: ${it.text}" }
  val instruction = "Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики. Выполняй просьбу пользователя, не отвечай пустыми подтверждениями, не повторяй одну и ту же мысль. Отвечай естественным русским языком, будь точным и не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели." +
   if (transcript.isNotBlank()) "\n\nКонтекст именно этой переписки (не смешивай его с другими чатами):\n" + transcript else ""
- return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + " Отвечай по существу, обычно 2–5 предложениями; сначала дай прямой ответ, затем важные детали. Не повторяй вопрос."), samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.62), maxOutputToken = 384))
+ return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + " Отвечай по существу, обычно 2–4 предложениями, без длинных вступлений; сначала дай прямой ответ, затем важные детали. Не повторяй вопрос."), samplerConfig = SamplerConfig(topK = 8, topP = 0.86, temperature = 0.60), maxOutputToken = 256))
 }
 
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
