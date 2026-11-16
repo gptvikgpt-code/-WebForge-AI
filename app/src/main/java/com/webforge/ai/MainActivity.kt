@@ -20,6 +20,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +35,10 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -105,6 +110,10 @@ private fun ChatApp() {
  var settings by remember { mutableStateOf(false) }
  var clearCacheDialog by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
+ var selectedTab by remember { mutableStateOf("chats") }
+ var photoUri by remember { mutableStateOf<Uri?>(null) }
+ var photoResult by remember { mutableStateOf("Выбери фотографию для локального анализа.") }
+ var photoBusy by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
  var activeWorkKind by remember { mutableStateOf("") }
  var activeDownloadConnection by remember { mutableStateOf<HttpURLConnection?>(null) }
@@ -123,6 +132,7 @@ private fun ChatApp() {
  val partialModel = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
  val partialSmartModel = remember { File(ctx.filesDir, "webforge-model-4b.download") }
  val listState = rememberLazyListState()
+ val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> photoUri = uri }
  val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
   if (uri != null) scope.launch {
    busy = true
@@ -151,6 +161,30 @@ private fun ChatApp() {
   }
  }
  LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+ LaunchedEffect(photoUri) {
+  val uri = photoUri ?: return@LaunchedEffect
+  photoBusy = true
+  photoResult = "Анализирую изображение на устройстве…"
+  try {
+   photoResult = withContext(Dispatchers.IO) {
+    val image = com.google.mlkit.vision.common.InputImage.fromFilePath(ctx, uri)
+    val options = com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions.Builder()
+     .setDetectorMode(com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+     .enableClassification().enableMultipleObjects().build()
+    val detector = com.google.mlkit.vision.objects.ObjectDetection.getClient(options)
+    val objects = com.google.android.gms.tasks.Tasks.await(detector.process(image))
+    val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+    val textResult = com.google.android.gms.tasks.Tasks.await(recognizer.process(image))
+    val labels = objects.flatMap { it.labels }.map { it.text }.distinct()
+    val detected = if (labels.isEmpty()) "Объекты не удалось уверенно классифицировать." else "Объекты: " + labels.joinToString(", ")
+    val words = textResult.text.trim()
+    detector.close(); recognizer.close()
+    detected + if (words.isNotBlank()) "\n\nТекст на фото:\n" + words else "\n\nТекст на изображении не найден."
+   }
+  } catch (e: Exception) {
+   photoResult = "Не удалось обработать фото: ${e.message}. Проверь формат изображения."
+  } finally { photoBusy = false }
+ }
 
  fun saveChat() {
   val a = JSONArray()
@@ -378,9 +412,8 @@ private fun ChatApp() {
  }
 
  Scaffold(
-  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(when { chat != null -> "На устройстве • активен"; startingModel -> "Запуск локальной модели…"; model != null -> "Модель найдена • готовлю запуск"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
-   IconButton(onClick = { memoryDialog = true }) { Icon(Icons.Default.Memory, "Память") }
-   IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
+  topBar = { TopAppBar(title = { Column { Text("WebForge AI"); Text(when { chat != null -> "Локальный ИИ • активен"; startingModel -> "Запуск модели…"; model != null -> "Модель установлена"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
+   IconButton(onClick = { selectedTab = "brain"; settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
   bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
