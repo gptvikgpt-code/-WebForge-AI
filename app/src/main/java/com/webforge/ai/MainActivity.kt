@@ -528,7 +528,9 @@ private fun ChatApp() {
    busy = true
    status = "Автоматически запускаю локальную модель…"
    val file = model!!
-   scope.launch(dispatcher) {
+   activeWorkKind = "startup"
+   task = scope.launch(dispatcher) {
+    val thisJob = currentCoroutineContext()[Job]
     var created: Engine? = null
     try {
      val gpu = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
@@ -538,10 +540,17 @@ private fun ChatApp() {
      }
      val convo = createLocalConversation(created, messages)
      chat?.close(); engine?.close(); engine = created; chat = convo
-     withContext(Dispatchers.Main) { status = "ИИ запущен локально"; busy = false; startingModel = false }
+     withContext(Dispatchers.Main) { status = "ИИ запущен локально" }
+    } catch (e: CancellationException) {
+     try { created?.close() } catch (_: Exception) {}
+     withContext(Dispatchers.Main) { if (task === thisJob) status = "Запуск модели остановлен." }
     } catch (e: Exception) {
      try { created?.close() } catch (_: Exception) {}
-     withContext(Dispatchers.Main) { status = "Не удалось запустить модель: ${e.message}"; busy = false; startingModel = false }
+     withContext(Dispatchers.Main) { if (task === thisJob) status = "Не удалось запустить модель: ${e.message}" }
+    } finally {
+     withContext(Dispatchers.Main) {
+      if (task === thisJob) { busy = false; startingModel = false; task = null; activeWorkKind = "" }
+     }
     }
    }
   }
@@ -591,6 +600,9 @@ private fun ChatApp() {
      task = null
      activeDownloadConnection = null
      busy = false
+     startingModel = false
+     queuedVoiceSend = false
+     pendingAutoListen = false
      downloadProgress = -1f
      if (kind == "chat") {
       val oldChat = chat
@@ -603,6 +615,8 @@ private fun ChatApp() {
        try { oldEngine?.close() } catch (_: Exception) {}
       }
       status = "Генерация остановлена. Для продолжения запусти ИИ в настройках."
+     } else if (kind == "startup") {
+      status = "Запуск модели остановлен."
      } else status = "Загрузка остановлена. Уже скачанная часть сохранена."
      activeWorkKind = ""
     }) { Text("Стоп") }
@@ -719,7 +733,9 @@ private fun ChatApp() {
     } else Button(enabled = !busy && model != null, modifier = Modifier.fillMaxWidth(), onClick = {
      busy = true; status = "Запускаю модель…"
      val file = model!!
-     scope.launch(dispatcher) {
+     activeWorkKind = "startup"
+     task = scope.launch(dispatcher) {
+      val thisJob = currentCoroutineContext()[Job]
       var created: Engine? = null
       try {
        val gpu = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
@@ -729,10 +745,17 @@ private fun ChatApp() {
        }
        val convo = createLocalConversation(created, messages)
        chat?.close(); engine?.close(); engine = created; chat = convo
-       withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; selectedTab = "chats"; busy = false }
+       withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; selectedTab = "chats" }
+      } catch (e: CancellationException) {
+       try { created?.close() } catch (_: Exception) {}
+       withContext(Dispatchers.Main) { if (task === thisJob) status = "Запуск модели остановлен." }
       } catch (e: Exception) {
        try { created?.close() } catch (_: Exception) {}
-       withContext(Dispatchers.Main) { status = "Не удалось запустить: ${e.message}"; busy = false }
+       withContext(Dispatchers.Main) { if (task === thisJob) status = "Не удалось запустить: ${e.message}" }
+      } finally {
+       withContext(Dispatchers.Main) {
+        if (task === thisJob) { busy = false; task = null; activeWorkKind = "" }
+       }
       }
      }
     }) { Text("Запустить ИИ") }
