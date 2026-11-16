@@ -9,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -76,6 +79,8 @@ private fun ChatApp() {
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
  var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
  var listening by remember { mutableStateOf(false) }
+ var voiceMode by remember { mutableStateOf(prefs.getBoolean("voice_mode", false)) }
+ var ttsReady by remember { mutableStateOf(false) }
  var pendingSpeechIntent by remember { mutableStateOf<Intent?>(null) }
  val submitVoice = remember { arrayOfNulls<() -> Unit>(1) }
  var tts by remember { mutableStateOf<TextToSpeech?>(null) }
@@ -101,21 +106,25 @@ private fun ChatApp() {
   }
  }
  DisposableEffect(ctx) {
-  val speaker = TextToSpeech(ctx)
+  val speaker = TextToSpeech(ctx, TextToSpeech.OnInitListener { result -> ttsReady = result == TextToSpeech.SUCCESS })
   tts = speaker
-  onDispose { try { speaker.stop(); speaker.shutdown() } catch (_: Exception) {}; tts = null }
+  onDispose { try { speaker.stop(); speaker.shutdown() } catch (_: Exception) {}; tts = null; ttsReady = false }
  }
- LaunchedEffect(tts) {
-  tts?.let { speaker ->
+ LaunchedEffect(ttsReady) {
+  if (ttsReady) tts?.let { speaker ->
    val result = speaker.setLanguage(Locale("ru", "RU"))
    if (result >= TextToSpeech.LANG_AVAILABLE) {
-    speaker.setSpeechRate(0.91f)
-    speaker.setPitch(0.86f)
-    val russianVoice = speaker.voices
-     ?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }
-     ?.maxByOrNull { it.quality }
+    speaker.setSpeechRate(0.94f)
+    speaker.setPitch(0.92f)
+    val russianVoice = speaker.voices?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality }
     if (russianVoice != null) speaker.voice = russianVoice
    }
+   speaker.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+    override fun onStart(utteranceId: String?) {}
+    override fun onDone(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+    @Deprecated("Deprecated in Java")
+    override fun onError(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+   })
   }
  }
  DisposableEffect(Unit) {
@@ -204,7 +213,7 @@ private fun ChatApp() {
      val answer = result.toString().trim().ifBlank { "Пустой ответ модели." }
      messages = messages + Msg(System.currentTimeMillis(), answer, false)
      saveChat(); status = "Локальный режим • записей памяти: ${memory.size}"
-     tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
+     if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
    } catch (e: CancellationException) {
     withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Ответ остановлен.", false); saveChat() }
@@ -250,10 +259,22 @@ private fun ChatApp() {
    IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
   bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
-   Row(verticalAlignment = Alignment.Bottom) {
-    OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (listening) "Слушаю…" else "Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
-    IconButton(onClick = { if (listening) { speechRecognizer?.stopListening(); listening = false } else beginVoiceInput() }, enabled = !busy) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, if (listening) "Остановить микрофон" else "Голосовой ввод") }
-    IconButton(onClick = { send() }, enabled = input.isNotBlank() && !busy) { Icon(Icons.Default.Send, "Отправить") }
+   Row(verticalAlignment = Alignment.CenterVertically) {
+    if (voiceMode) {
+     Column(Modifier.weight(1f).padding(start = 12.dp)) {
+      Text(if (listening) "Слушаю тебя…" else if (busy) "Готовлю ответ…" else "Голосовой режим", style = MaterialTheme.typography.bodyLarge)
+      Text("Нажми клавиатуру, чтобы вернуться к тексту", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+     }
+    } else {
+     OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
+    }
+    IconButton(onClick = {
+     voiceMode = !voiceMode
+     prefs.edit().putBoolean("voice_mode", voiceMode).apply()
+     if (voiceMode) { tts?.stop(); beginVoiceInput() }
+     else { try { speechRecognizer?.cancel() } catch (_: Exception) {}; listening = false; tts?.stop(); status = "Текстовый режим" }
+    }) { Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.GraphicEq, if (voiceMode) "Переключить на текст" else "Переключить на голос") }
+    if (!voiceMode) IconButton(onClick = { send() }, enabled = input.isNotBlank() && !busy) { Icon(Icons.Default.Send, "Отправить") }
    }
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
     LinearProgressIndicator(Modifier.weight(1f))
