@@ -135,16 +135,42 @@ private fun ChatApp() {
    val recognizer = SpeechRecognizer.createSpeechRecognizer(ctx)
    speechRecognizer = recognizer
    recognizer.setRecognitionListener(object : RecognitionListener {
-    override fun onReadyForSpeech(params: Bundle?) { listening = true; status = "Слушаю… говори." }
-    override fun onBeginningOfSpeech() { listening = true }
+    private fun isCurrent() = speechRecognizer === recognizer
+    override fun onReadyForSpeech(params: Bundle?) {
+     if (!isCurrent()) return
+     listening = true; status = "Слушаю… говори."
+    }
+    override fun onBeginningOfSpeech() { if (isCurrent()) listening = true }
     override fun onRmsChanged(rmsdB: Float) {}
     override fun onBufferReceived(buffer: ByteArray?) {}
-    override fun onEndOfSpeech() { listening = false; status = "Обрабатываю речь…" }
-    override fun onError(error: Int) { listening = false; status = "Не удалось распознать речь (код $error). Нажми микрофон и попробуй ещё раз." }
+    override fun onEndOfSpeech() {
+     if (!isCurrent()) return
+     listening = false; status = "Обрабатываю речь…"
+    }
+    override fun onError(error: Int) {
+     if (!isCurrent()) return
+     listening = false
+     status = when (error) {
+      SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
+       "Служба распознавания речи отключилась (код 11). Нажми микрофон ещё раз. Если повторяется — проверь приложение Google и сервис распознавания речи."
+      SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+       "Нет доступа к микрофону. Разреши его в настройках Android."
+      SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+       "Распознавание ещё занято. Подожди секунду и нажми микрофон снова."
+      SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+       "Нет соединения со службой распознавания речи. Проверь интернет и попробуй снова."
+      else -> "Не удалось распознать речь (код $error). Нажми микрофон и попробуй ещё раз."
+     }
+     try { recognizer.destroy() } catch (_: Exception) {}
+     speechRecognizer = null
+    }
     override fun onResults(results: Bundle?) {
+     if (!isCurrent()) return
      listening = false
      val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-     if (spoken.isNotBlank()) { input = spoken; submitVoice[0]?.invoke() } else status = "Речь не распознана. Попробуй ещё раз."
+     try { recognizer.destroy() } catch (_: Exception) {}
+     speechRecognizer = null
+     if (spoken.isNotBlank()) { input = spoken; submitVoice[0]?.invoke() } else status = "Речь не распознана. Нажми микрофон и попробуй ещё раз."
     }
     override fun onPartialResults(partialResults: Bundle?) {}
     override fun onEvent(eventType: Int, params: Bundle?) {}
