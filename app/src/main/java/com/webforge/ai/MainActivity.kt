@@ -57,6 +57,7 @@ private fun ForgeApp() {
  var html by remember { mutableStateOf(defaultPage()) }
  var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
  var busy by remember { mutableStateOf(false) }
+ var downloadProgress by remember { mutableFloatStateOf(-1f) }
  var preview by remember { mutableStateOf(false) }
  var showSettings by remember { mutableStateOf(false) }
 
@@ -111,6 +112,19 @@ private fun ForgeApp() {
   } }
  ) { pad ->
   Column(Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
+   if (busy) {
+    if (downloadProgress >= 0f) {
+     LinearProgressIndicator(progress = { downloadProgress / 100f }, modifier = Modifier.fillMaxWidth())
+     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      Text(status, style = MaterialTheme.typography.bodySmall)
+      Text("${downloadProgress.toInt()}%", style = MaterialTheme.typography.labelLarge)
+     }
+    } else {
+     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+     Text(status, style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(Modifier.height(10.dp))
+   }
    when {
     showSettings -> {
      Text("Локальный ИИ", style = MaterialTheme.typography.headlineSmall)
@@ -122,6 +136,7 @@ private fun ForgeApp() {
      Button(
       onClick = {
        busy = true
+       downloadProgress = 0f
        status = "Скачиваю бесплатную локальную модель Qwen3 0.6B…"
        scope.launch {
         try {
@@ -135,6 +150,8 @@ private fun ForgeApp() {
           connection.connect()
           if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
           val expected = connection.contentLengthLong
+          var downloaded = 0L
+          if (expected <= 0L) withContext(Dispatchers.Main) { downloadProgress = -1f }
           connection.inputStream.use { input ->
            tempFile.outputStream().buffered().use { output ->
             val buffer = ByteArray(1024 * 1024)
@@ -142,9 +159,15 @@ private fun ForgeApp() {
              val count = input.read(buffer)
              if (count < 0) break
              output.write(buffer, 0, count)
+             downloaded += count
+             if (expected > 0L) {
+              val percent = (downloaded * 100f / expected).coerceIn(0f, 99.9f)
+              withContext(Dispatchers.Main) { downloadProgress = percent }
+             }
             }
            }
           }
+          withContext(Dispatchers.Main) { if (expected > 0L) downloadProgress = 100f }
           connection.disconnect()
           if (tempFile.length() < 250L * 1024L * 1024L || (expected > 0 && tempFile.length() != expected)) {
            tempFile.delete()
@@ -155,10 +178,11 @@ private fun ForgeApp() {
           finalFile
          }
          modelFile = target
+         downloadProgress = -1f
          status = "Модель скачана: ${target.length() / (1024 * 1024)} МБ. Нажмите «Загрузить модель»."
         } catch (e: Exception) {
          status = "Ошибка скачивания модели: ${e.message}"
-        } finally { busy = false }
+        } finally { downloadProgress = -1f; busy = false }
        }
       },
       enabled = !busy && conversation == null,
