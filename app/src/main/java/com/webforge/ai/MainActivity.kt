@@ -465,7 +465,12 @@ private fun ChatApp() {
      messages = if (last?.id == responseId) messages.dropLast(1) + Msg(responseId, answer, false)
       else messages + Msg(responseId, answer, false)
      saveChat(); status = "Локальный режим • ${if (model?.name == "webforge-model-4b.litertlm") "умная 4B" else "быстрая 1.7B"} • память: ${memory.size}"
-     if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
+     if (voiceMode) {
+      if (ttsReady && tts != null) {
+       val speakResult = tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
+       if (speakResult == TextToSpeech.ERROR) status = "Не удалось запустить озвучку. Проверь синтез речи Android."
+      } else pendingAnswerSpeech = answer
+     }
     }
    } catch (e: CancellationException) {
     withContext(Dispatchers.Main) {
