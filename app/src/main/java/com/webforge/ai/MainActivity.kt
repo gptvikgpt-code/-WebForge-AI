@@ -203,10 +203,42 @@ private fun ChatApp() {
    messages = messages + Msg(System.currentTimeMillis() + 1, if (fact != null) "Сохранил в память. Запусти модель в настройках, чтобы продолжить общение." else "Сначала запусти локальную модель в настройках. Переписка сохранится.", false)
    saveChat(); return
   }
+  val isComplex = isComplexPrompt(text)
+  val fastFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() }
+  val desiredModel = when {
+   isComplex && smartModel != null -> smartModel
+   !isComplex && model?.name == "webforge-model-4b.litertlm" && fastFile != null -> fastFile
+   else -> model
+  }
   busy = true
-  status = if (fact != null) "Записал в память • думаю…" else "Думаю локально…"
+  status = if (desiredModel?.name == "webforge-model-4b.litertlm") "Переключаюсь на умную модель 4B…" else if (isComplex && smartModel == null) "Сложная задача • использую доступную модель 1.7B…" else "Думаю локально…"
   task = scope.launch(dispatcher) {
    try {
+    if (desiredModel != null && model?.absolutePath != desiredModel.absolutePath) {
+     try { chat?.close() } catch (_: Exception) {}
+     try { engine?.close() } catch (_: Exception) {}
+     var selectedFile = desiredModel
+     var replacement: Engine? = null
+     try {
+      val gpu = Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
+      replacement = try { gpu.initialize(); gpu } catch (_: Exception) {
+       try { gpu.close() } catch (_: Exception) {}
+       Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+      }
+     } catch (modelError: Exception) {
+      if (selectedFile.name != "webforge-model-4b.litertlm" || fastFile == null) throw modelError
+      selectedFile = fastFile
+      val fallback = Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath))
+      replacement = fallback.also { it.initialize() }
+      withContext(Dispatchers.Main) { status = "4B не запустилась — перешёл на быструю 1.7B." }
+     }
+     val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
+      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.58),
+      maxOutputToken = 768
+     ))
+     engine = replacement; chat = replacementChat; model = selectedFile
+    }
     // Shorter context reduces prompt-prefill time on mobile hardware.
     // Conversation retains its own turns; re-sending them duplicates tokens and slows every request.
     val relevantMemory = selectRelevantMemory(memory, text, 6)
@@ -229,7 +261,7 @@ private fun ChatApp() {
      if (previous == null || previous.user || cleanModelText(previous.text) != answer) {
       messages = messages + Msg(System.currentTimeMillis(), answer, false)
      }
-     saveChat(); status = "Локальный режим • записей памяти: ${memory.size}"
+     saveChat(); status = "Локальный режим • ${if (model?.name == "webforge-model-4b.litertlm") "умная 4B" else "быстрая 1.7B"} • память: ${memory.size}"
      if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
    } catch (e: CancellationException) {
@@ -456,6 +488,12 @@ private fun ChatApp() {
   dismissButton = { TextButton(onClick = { memory = emptyList(); saveMemory() }) { Text("Очистить") } }
  )
 }
+private fun isComplexPrompt(text: String): Boolean {
+ val value = text.lowercase()
+ val markers = listOf("создай приложение", "создай проект", "напиши код", "исправь ошиб", "разработай", "архитектур", "оптимизируй", "рефактор", "debug", "kotlin", "gradle", "android", "api", "алгоритм", "интеграц", "собери apk", "веб-прилож", "приложение", "проект", "программ", "код", "разберись с")
+ return text.length > 420 || markers.any { value.contains(it) } || text.lines().size > 8
+}
+
 private fun selectRelevantMemory(memory: List<String>, query: String, limit: Int): List<String> {
  val stop = setOf("это", "как", "что", "для", "или", "мне", "меня", "тебя", "надо", "нужно", "можно", "пожалуйста", "сделай", "почему")
  fun words(value: String) = Regex("[\\p{L}\\p{N}]{3,}").findAll(value.lowercase())
