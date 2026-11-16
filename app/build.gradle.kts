@@ -21,5 +21,7 @@ dependencies {
  implementation("androidx.compose.material:material-icons-extended")
  implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
  implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
+ implementation("com.google.mlkit:object-detection:17.0.2")
+ implementation("com.google.mlkit:text-recognition:16.0.1")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }
