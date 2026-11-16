@@ -27,6 +27,8 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
@@ -58,6 +60,7 @@ private fun ForgeApp() {
  val partialModelFile = remember { File(ctx.filesDir, "webforge-model.download") }
  var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else if (partialModelFile.exists() && partialModelFile.length() > 0L) "Найдена незавершённая загрузка: ${partialModelFile.length() / (1024 * 1024)} МБ. Нажмите «Продолжить загрузку»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
  var busy by remember { mutableStateOf(false) }
+ var generationJob by remember { mutableStateOf<Job?>(null) }
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
  var preview by remember { mutableStateOf(false) }
  var showSettings by remember { mutableStateOf(false) }
@@ -231,18 +234,26 @@ private fun ForgeApp() {
       busy = true
       status = "Локальный ИИ создаёт проект…"
       val request = "Создай готовый веб-проект по описанию: $prompt. Верни только полный HTML-документ."
-      scope.launch(modelDispatcher) {
+      generationJob = scope.launch(modelDispatcher) {
        try {
         val output = StringBuilder()
         checkNotNull(conversation).sendMessageAsync(request).collect { output.append(it.toString()) }
         val result = output.toString().trim().removePrefix("```html").removePrefix("```").removeSuffix("```").trim()
         require(result.contains("<html", true) || result.contains("<!doctype", true)) { "Модель не вернула HTML. Уточните запрос." }
         withContext(Dispatchers.Main) { html = result; status = "Проект создан локально. Откройте «Просмотр»."; preview = true; busy = false; android.widget.Toast.makeText(ctx, "Проект успешно создан!", android.widget.Toast.LENGTH_LONG).show() }
+       } catch (e: CancellationException) {
+        withContext(Dispatchers.Main) { status = "Создание остановлено пользователем."; busy = false; generationJob = null }
        } catch (e: Exception) {
-        withContext(Dispatchers.Main) { status = "Ошибка локальной генерации: ${e.message}"; busy = false }
+        withContext(Dispatchers.Main) { status = "Ошибка локальной генерации: ${e.message}"; busy = false; generationJob = null }
+       } finally {
+        withContext(Dispatchers.Main) { busy = false; generationJob = null }
        }
       }
      }, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Создаю…" else "Создать с ИИ") }
+     if (busy && generationJob != null) {
+      Spacer(Modifier.height(8.dp))
+      OutlinedButton(onClick = { generationJob?.cancel(); status = "Останавливаю создание…" }, modifier = Modifier.fillMaxWidth()) { Text("■ Стоп создания") }
+     }
      Spacer(Modifier.height(8.dp))
      Text(status, style = MaterialTheme.typography.bodySmall)
      if (conversation == null) {
