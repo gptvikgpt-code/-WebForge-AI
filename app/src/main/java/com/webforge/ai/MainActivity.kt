@@ -431,8 +431,8 @@ private fun ChatApp() {
      enabled = !busy && smartModel == null,
      modifier = Modifier.fillMaxWidth(),
      onClick = {
-      busy = true; downloadProgress = -1f; status = "Загружаю умную модель Qwen3 4B…"
-      scope.launch {
+      busy = true; activeWorkKind = "download"; downloadProgress = -1f; status = "Загружаю умную модель Qwen3 4B…"
+      task = scope.launch {
        try {
         val target = withContext(Dispatchers.IO) {
          val finalFile = File(ctx.filesDir, "webforge-model-4b.litertlm")
