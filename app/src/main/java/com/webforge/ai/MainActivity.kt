@@ -232,17 +232,11 @@ private fun ChatApp() {
    messages = messages + Msg(System.currentTimeMillis() + 1, if (fact != null) "Сохранил в память. Запусти модель в настройках, чтобы продолжить общение." else "Сначала запусти локальную модель в настройках. Переписка сохранится.", false)
    saveChat(); return
   }
-  val isComplex = isComplexPrompt(text)
-  val fastFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() }
-  // Keep the currently loaded model between requests. Reinitializing a multi-GB
-  // model can take several seconds; switch to 4B only when a complex task needs it.
-  // Do not switch back to 1.7B automatically after every short follow-up.
-  val desiredModel = when {
-   isComplex && smartModel != null && model?.name != "webforge-model-4b.litertlm" -> smartModel
-   else -> model
-  }
+  // Never switch to the 4B model automatically: loading it adds a long pause.
+  // The user can still select 4B explicitly in Settings for quality-critical tasks.
+  val desiredModel = model
   busy = true
-  status = if (desiredModel?.name == "webforge-model-4b.litertlm") "Переключаюсь на умную модель 4B…" else if (isComplex && smartModel == null) "Сложная задача • использую доступную модель 1.7B…" else "Думаю локально…"
+  status = "Быстрый локальный режим • генерирую ответ…"
   activeWorkKind = "chat"
   task = scope.launch(dispatcher) {
    try {
@@ -255,7 +249,7 @@ private fun ChatApp() {
       val gpu = Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
       replacement = try { gpu.initialize(); gpu } catch (_: Exception) {
        try { gpu.close() } catch (_: Exception) {}
-       Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+       Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 8)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
       }
      } catch (modelError: Exception) {
       if (selectedFile.name != "webforge-model-4b.litertlm" || fastFile == null) throw modelError
@@ -266,17 +260,17 @@ private fun ChatApp() {
      }
      val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
       systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-      samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.58),
-      maxOutputToken = 512
+      samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
+      maxOutputToken = 256
      ))
      engine = replacement; chat = replacementChat; model = selectedFile
     }
     // Shorter context reduces prompt-prefill time on mobile hardware.
     // Conversation retains its own turns; re-sending them duplicates tokens and slows every request.
-    val relevantMemory = selectRelevantMemory(memory, text, 4)
-    val prompt = if (relevantMemory.isEmpty()) text else
+    val relevantMemory = selectRelevantMemory(memory, text, 2)
+    val prompt = (if (relevantMemory.isEmpty()) text else
      "Полезная память о пользователе (используй только по теме):\n" +
-      relevantMemory.joinToString("\n") { "- $it" } + "\n\nЗапрос: $text"
+      relevantMemory.joinToString("\n") { "- $it" } + "\n\nЗапрос: $text") + "\n/no_think"
     val result = StringBuilder()
     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
      val chunk = piece.toString()
@@ -500,8 +494,8 @@ private fun ChatApp() {
        }
        val convo = created.createConversation(ConversationConfig(
         systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-        samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.62),
-        maxOutputToken = 512
+        samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
+        maxOutputToken = 256
        ))
        chat?.close(); engine?.close(); engine = created; chat = convo
        withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; busy = false }
