@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.media.AudioAttributes
 import android.view.View
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -189,6 +190,9 @@ private fun ChatApp() {
  var listening by remember { mutableStateOf(false) }
  var voiceMode by remember { mutableStateOf(prefs.getBoolean("voice_mode", false)) }
  var ttsReady by remember { mutableStateOf(false) }
+ var pendingAnswerSpeech by remember { mutableStateOf<String?>(null) }
+ val currentVoiceMode by rememberUpdatedState(voiceMode)
+ val currentBusy by rememberUpdatedState(busy)
  var pendingSpeechIntent by remember { mutableStateOf<Intent?>(null) }
  val submitVoice = remember { arrayOfNulls<() -> Unit>(1) }
  var tts by remember { mutableStateOf<TextToSpeech?>(null) }
@@ -362,19 +366,34 @@ private fun ChatApp() {
  }
  LaunchedEffect(ttsReady) {
   if (ttsReady) tts?.let { speaker ->
-   val result = speaker.setLanguage(Locale("ru", "RU"))
-   if (result >= TextToSpeech.LANG_AVAILABLE) {
-    speaker.setSpeechRate(1.04f)
-    speaker.setPitch(1.0f)
-    val russianVoice = speaker.voices?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality }
-    if (russianVoice != null) speaker.voice = russianVoice
+   speaker.setAudioAttributes(AudioAttributes.Builder()
+    .setUsage(AudioAttributes.USAGE_MEDIA)
+    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+    .build())
+   val languageResult = speaker.setLanguage(Locale("ru", "RU"))
+   speaker.setSpeechRate(1.10f)
+   speaker.setPitch(1.0f)
+   val russianVoice = speaker.voices
+    ?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }
+    ?.maxByOrNull { it.quality }
+   if (russianVoice != null) speaker.voice = russianVoice
+   if (languageResult == TextToSpeech.LANG_MISSING_DATA || languageResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+    status = "Не найден русский голос TTS. Установи русский голос в настройках синтеза речи Android."
    }
    speaker.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
     override fun onStart(utteranceId: String?) {}
-    override fun onDone(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+    override fun onDone(utteranceId: String?) {
+     ctx.mainExecutor.execute { if (currentVoiceMode && !currentBusy) beginVoiceInput() }
+    }
     @Deprecated("Deprecated in Java")
-    override fun onError(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+    override fun onError(utteranceId: String?) {
+     ctx.mainExecutor.execute { status = "Не удалось озвучить ответ. Проверь движок синтеза речи Android." }
+    }
    })
+   pendingAnswerSpeech?.let { answer ->
+    pendingAnswerSpeech = null
+    if (currentVoiceMode) speaker.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
+   }
   }
  }
  fun send() {
@@ -923,7 +942,7 @@ private fun createLocalConversation(engine: Engine, history: List<Msg>): Convers
  val transcript = history.takeLast(14).joinToString("\n") { if (it.user) "Пользователь: ${it.text}" else "Ассистент: ${it.text}" }
  val instruction = "Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики. Выполняй просьбу пользователя, не отвечай пустыми подтверждениями, не повторяй одну и ту же мысль. Отвечай естественным русским языком, будь точным и не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели." +
   if (transcript.isNotBlank()) "\n\nКонтекст именно этой переписки (не смешивай его с другими чатами):\n" + transcript else ""
- return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction), samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.62), maxOutputToken = 512))
+ return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + " Отвечай по существу, обычно 2–5 предложениями; сначала дай прямой ответ, затем важные детали. Не повторяй вопрос."), samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.62), maxOutputToken = 384))
 }
 
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
