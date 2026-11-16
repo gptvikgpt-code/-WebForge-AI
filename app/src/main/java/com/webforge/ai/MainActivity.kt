@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -89,6 +90,17 @@ private fun detectTopicColor(messages: List<Msg>): String {
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
+  // Match Android system bars to the dark WebForge theme.
+  window.statusBarColor = android.graphics.Color.rgb(23, 26, 23)
+  window.navigationBarColor = android.graphics.Color.rgb(7, 17, 9)
+  if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+   window.isStatusBarContrastEnforced = false
+   window.isNavigationBarContrastEnforced = false
+  }
+  // Keep system icons light on the dark status/navigation backgrounds.
+  window.decorView.systemUiVisibility = window.decorView.systemUiVisibility and
+   View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and
+   View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
   setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF8BFF70), onPrimary = Color(0xFF10210B), primaryContainer = Color(0xFF23451D), onPrimaryContainer = Color(0xFFD7FFCC), secondary = Color(0xFFB6F59F), tertiary = Color(0xFF8BFF70), surface = Color(0xFF171A17), background = Color(0xFF101210), surfaceVariant = Color(0xFF252A25), onSurface = Color(0xFFE7F1E3), onSurfaceVariant = Color(0xFFC1CCBC))) { ChatApp() } }
  }
 }
