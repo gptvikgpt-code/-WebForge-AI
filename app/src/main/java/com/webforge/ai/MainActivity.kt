@@ -237,7 +237,7 @@ private fun ForgeApp() {
         checkNotNull(conversation).sendMessageAsync(request).collect { output.append(it.toString()) }
         val result = output.toString().trim().removePrefix("```html").removePrefix("```").removeSuffix("```").trim()
         require(result.contains("<html", true) || result.contains("<!doctype", true)) { "Модель не вернула HTML. Уточните запрос." }
-        withContext(Dispatchers.Main) { html = result; status = "Проект создан локально. Откройте «Просмотр»."; preview = true; busy = false }
+        withContext(Dispatchers.Main) { html = result; status = "Проект создан локально. Откройте «Просмотр»."; preview = true; busy = false; android.widget.Toast.makeText(ctx, "Проект успешно создан!", android.widget.Toast.LENGTH_LONG).show() }
        } catch (e: Exception) {
         withContext(Dispatchers.Main) { status = "Ошибка локальной генерации: ${e.message}"; busy = false }
        }
