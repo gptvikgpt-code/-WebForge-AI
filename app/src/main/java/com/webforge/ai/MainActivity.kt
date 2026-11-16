@@ -76,7 +76,7 @@ private fun ChatApp() {
  var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
  var listening by remember { mutableStateOf(false) }
  var pendingSpeechIntent by remember { mutableStateOf<Intent?>(null) }
- var submitVoice by remember { mutableStateOf<(() -> Unit)?>(null) }
+ val submitVoice = remember { arrayOfNulls<() -> Unit>(1) }
  var tts by remember { mutableStateOf<TextToSpeech?>(null) }
  val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
   if (granted) pendingSpeechIntent?.let { speechRecognizer?.startListening(it); listening = true }
@@ -135,7 +135,7 @@ private fun ChatApp() {
     override fun onResults(results: Bundle?) {
      listening = false
      val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-     if (spoken.isNotBlank()) { input = spoken; submitVoice?.invoke() } else status = "Речь не распознана. Попробуй ещё раз."
+     if (spoken.isNotBlank()) { input = spoken; submitVoice[0]?.invoke() } else status = "Речь не распознана. Попробуй ещё раз."
     }
     override fun onPartialResults(partialResults: Bundle?) {}
     override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -198,7 +198,7 @@ private fun ChatApp() {
    finally { withContext(Dispatchers.Main) { busy = false; task = null } }
   }
  }
- submitVoice = { send() }
+ submitVoice[0] = { send() }
 
  Scaffold(
   topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(if (chat != null) "На устройстве • активен" else "Модель не запущена", style = MaterialTheme.typography.labelSmall) } }, actions = {
