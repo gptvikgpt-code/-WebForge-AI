@@ -91,6 +91,35 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 
 @Composable
+private fun CircuitOverlay(modifier: Modifier = Modifier) {
+ Canvas(modifier = modifier.alpha(0.58f)) {
+  val neon = Color(0xFF00F044)
+  val w = size.width
+  val h = size.height
+  val paths = listOf(
+   listOf(0.00f to 0.10f, 0.18f to 0.10f, 0.25f to 0.04f, 0.48f to 0.04f),
+   listOf(1.00f to 0.18f, 0.82f to 0.18f, 0.76f to 0.24f, 0.60f to 0.24f),
+   listOf(0.00f to 0.66f, 0.16f to 0.66f, 0.22f to 0.72f, 0.40f to 0.72f),
+   listOf(1.00f to 0.78f, 0.84f to 0.78f, 0.78f to 0.84f, 0.55f to 0.84f),
+   listOf(0.08f to 1.00f, 0.08f to 0.91f, 0.20f to 0.91f, 0.26f to 0.86f),
+   listOf(0.92f to 0.00f, 0.92f to 0.08f, 0.80f to 0.08f, 0.74f to 0.14f)
+  )
+  paths.forEach { points ->
+   val path = Path()
+   points.forEachIndexed { index, p ->
+    val x = p.first * w
+    val y = p.second * h
+    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+   }
+   drawPath(path, neon.copy(alpha = 0.32f), style = Stroke(width = 2.dp.toPx()))
+   points.filterIndexed { index, _ -> index == 1 || index == 2 }.forEach { p ->
+    drawCircle(neon.copy(alpha = 0.65f), radius = 4.dp.toPx(), center = Offset(p.first * w, p.second * h))
+   }
+  }
+ }
+}
+
+@Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
  Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
   Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -672,6 +701,7 @@ private fun ChatApp() {
      modifier = Modifier.fillMaxSize().alpha(0.38f),
      contentScale = ContentScale.Crop
     )
+    CircuitOverlay(Modifier.fillMaxSize())
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
      Icon(Icons.Default.Memory, null, modifier = Modifier.size(56.dp), tint = Color(0xFF69FF75))
      Text("Твой локальный ИИ", style = MaterialTheme.typography.headlineSmall, color = Color.White)
