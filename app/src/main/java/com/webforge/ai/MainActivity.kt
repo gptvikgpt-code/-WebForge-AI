@@ -251,7 +251,7 @@ private fun ChatApp() {
       val gpu = Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
       replacement = try { gpu.initialize(); gpu } catch (_: Exception) {
        try { gpu.close() } catch (_: Exception) {}
-       Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 8)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+       Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 6)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
       }
      } catch (modelError: Exception) {
       if (selectedFile.name != "webforge-model-4b.litertlm" || fastFile == null) throw modelError
@@ -261,7 +261,7 @@ private fun ChatApp() {
       withContext(Dispatchers.Main) { status = "4B не запустилась — перешёл на быструю 1.7B." }
      }
      val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
       samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
       maxOutputToken = 256
      ))
@@ -274,6 +274,7 @@ private fun ChatApp() {
      "Полезная память о пользователе (используй только по теме):\n" +
       relevantMemory.joinToString("\n") { "- $it" } + "\n\nЗапрос: $text") + "\n/no_think"
     val result = StringBuilder()
+    var lastUiLength = 0
     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
      val chunk = piece.toString()
      when {
@@ -282,13 +283,17 @@ private fun ChatApp() {
       chunk.startsWith(result.toString()) -> { result.setLength(0); result.append(chunk) }
       else -> result.append(chunk)
      }
+     // Batch UI refreshes: avoid a Compose recomposition for every tiny token.
      val liveText = cleanModelText(result.toString())
-     withContext(Dispatchers.Main) {
-      val last = messages.lastOrNull()
-      if (last?.id == responseId) {
-       messages = messages.dropLast(1) + Msg(responseId, liveText, false)
-       if (liveText.isNotBlank()) status = "Пишу ответ…"
+     if (liveText.length - lastUiLength >= 24 || (liveText.isNotBlank() && lastUiLength == 0)) {
+      withContext(Dispatchers.Main) {
+       val last = messages.lastOrNull()
+       if (last?.id == responseId) {
+        messages = messages.dropLast(1) + Msg(responseId, liveText, false)
+        if (liveText.isNotBlank()) status = "Пишу ответ…"
+       }
       }
+      lastUiLength = liveText.length
      }
     }
     withContext(Dispatchers.Main) {
@@ -331,10 +336,10 @@ private fun ChatApp() {
      val gpu = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
      created = try { gpu.initialize(); gpu } catch (_: Exception) {
       try { gpu.close() } catch (_: Exception) {}
-      Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+      Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 6)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
      }
      val convo = created.createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
       samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.58),
       maxOutputToken = 512
      ))
@@ -513,7 +518,7 @@ private fun ChatApp() {
         Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
        }
        val convo = created.createConversation(ConversationConfig(
-        systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+        systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
         samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
         maxOutputToken = 256
        ))
