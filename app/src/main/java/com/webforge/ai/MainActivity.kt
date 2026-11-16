@@ -259,17 +259,15 @@ private fun ChatApp() {
       }
      val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
       systemInstruction = Contents.of("Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики диалога. Выполняй именно просьбу пользователя: если он просит перевести текст, переведи его; если просит объяснить или разобраться, действительно проанализируй вопрос и дай результат. Не подменяй задачу советом на другую тему. Не отвечай пустыми подтверждениями вроде «разбираюсь», «я помогу», «да, конечно» — сразу выполняй запрос. Не повторяй одну и ту же фразу или факт в каждом ответе. Сведения из памяти используй незаметно, только когда они действительно помогают; никогда не пересказывай блок памяти пользователю и не выдавай его за ответ. Если пользователь сообщает о намерении или предпочтении, кратко подтверди один раз и дальше учитывай это в контексте. Для перевода сохраняй исходный смысл и указывай только перевод, если не попросили пояснение. Отвечай естественным русским языком, если пользователь не просит другой язык. Будь точным, рассуждай достаточно глубоко для решения задачи, но формулируй ответ ясно и без лишней воды. Если запрос неоднозначен, задай один конкретный уточняющий вопрос. Не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели."),
-      samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.68),
+      samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.62),
       maxOutputToken = 384
      ))
      engine = replacement; chat = replacementChat; model = selectedFile
     }
-    // Shorter context reduces prompt-prefill time on mobile hardware.
-    // Conversation retains its own turns; re-sending them duplicates tokens and slows every request.
-    val relevantMemory = selectRelevantMemory(memory, text, 3)
-    val prompt = (if (relevantMemory.isEmpty()) text else
-     "Контекст о пользователе (не пересказывай его; используй только если относится к запросу):\n" +
-      relevantMemory.joinToString("\n") { "- $it" } + "\n\nЗапрос: $text")
+    // The conversation already retains dialogue history. Do not inject keyword-matched
+    // memory into every prompt: it can distract small models and cause repetitive answers.
+    // Sending only the new user turn also reduces prompt-prefill latency.
+    val prompt = text
     val result = StringBuilder()
     var lastUiLength = 0
     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
@@ -516,7 +514,7 @@ private fun ChatApp() {
        }
        val convo = created.createConversation(ConversationConfig(
         systemInstruction = Contents.of("Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики диалога. Выполняй именно просьбу пользователя: если он просит перевести текст, переведи его; если просит объяснить или разобраться, действительно проанализируй вопрос и дай результат. Не подменяй задачу советом на другую тему. Не отвечай пустыми подтверждениями вроде «разбираюсь», «я помогу», «да, конечно» — сразу выполняй запрос. Не повторяй одну и ту же фразу или факт в каждом ответе. Сведения из памяти используй незаметно, только когда они действительно помогают; никогда не пересказывай блок памяти пользователю и не выдавай его за ответ. Если пользователь сообщает о намерении или предпочтении, кратко подтверди один раз и дальше учитывай это в контексте. Для перевода сохраняй исходный смысл и указывай только перевод, если не попросили пояснение. Отвечай естественным русским языком, если пользователь не просит другой язык. Будь точным, рассуждай достаточно глубоко для решения задачи, но формулируй ответ ясно и без лишней воды. Если запрос неоднозначен, задай один конкретный уточняющий вопрос. Не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели."),
-        samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.68),
+        samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.62),
         maxOutputToken = 384
        ))
        chat?.close(); engine?.close(); engine = created; chat = convo
