@@ -143,39 +143,14 @@ private fun ForgeApp() {
          val target = withContext(Dispatchers.IO) {
           val finalFile = File(ctx.filesDir, "webforge-model.litertlm")
           val tempFile = File(ctx.filesDir, "webforge-model.download")
-          val connection = URL("https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true").openConnection() as HttpURLConnection
-          connection.connectTimeout = 30000
-          connection.readTimeout = 90000
-          connection.useCaches = false
-          connection.setRequestProperty("User-Agent", "WebForge-AI-Android/1.0")
-          connection.setRequestProperty("Accept", "application/octet-stream")
-          connection.instanceFollowRedirects = true
-          connection.connect()
-          if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
-          withContext(Dispatchers.Main) { status = "Соединение установлено. Скачиваю файл модели…" }
-          val expected = connection.contentLengthLong
-          var downloaded = 0L
-          if (expected <= 0L) withContext(Dispatchers.Main) { downloadProgress = -1f }
-          connection.inputStream.use { input ->
-           tempFile.outputStream().buffered().use { output ->
-            val buffer = ByteArray(1024 * 1024)
-            while (true) {
-             val count = input.read(buffer)
-             if (count < 0) break
-             output.write(buffer, 0, count)
-             downloaded += count
-             if (expected > 0L) {
-              val percent = (downloaded * 100f / expected).coerceIn(0f, 99.9f)
-              withContext(Dispatchers.Main) { downloadProgress = percent }
-             }
-            }
-           }
+          downloadModelResumable(
+           "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true",
+           tempFile
+          ) { percent ->
+           withContext(Dispatchers.Main) { downloadProgress = percent }
           }
-          withContext(Dispatchers.Main) { if (expected > 0L) downloadProgress = 100f }
-          connection.disconnect()
-          if (tempFile.length() < 250L * 1024L * 1024L || (expected > 0 && tempFile.length() != expected)) {
-           tempFile.delete()
-           error("Файл модели скачан не полностью")
+          if (tempFile.length() < 250L * 1024L * 1024L) {
+           error("Файл модели неполный: ${tempFile.length() / (1024 * 1024)} МБ. Частичная загрузка сохранена — повторите, докачивание продолжится.")
           }
           if (finalFile.exists()) finalFile.delete()
           if (!tempFile.renameTo(finalFile)) error("Не удалось сохранить модель")
@@ -277,6 +252,103 @@ private fun ForgeApp() {
    }
   }
  }
+}
+
+
+/**
+ * Resumable Hugging Face download. Keeps partial bytes after network failures and
+ * continues with an HTTP Range request instead of restarting the 300+ MB file.
+ */
+private suspend fun downloadModelResumable(
+ url: String,
+ tempFile: File,
+ onProgress: suspend (Float) -> Unit
+) {
+ var attempt = 0
+ var totalBytes = -1L
+ var lastError: Exception? = null
+ while (attempt < 8) {
+  attempt++
+  val offset = if (tempFile.exists()) tempFile.length() else 0L
+  var connection: HttpURLConnection? = null
+  try {
+   connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    connectTimeout = 45000
+    readTimeout = 180000
+    useCaches = false
+    instanceFollowRedirects = true
+    requestMethod = "GET"
+    setRequestProperty("User-Agent", "WebForge-AI-Android/1.1")
+    setRequestProperty("Accept", "application/octet-stream")
+    if (offset > 0L) setRequestProperty("Range", "bytes=${offset}-")
+   }
+   connection.connect()
+   val code = connection.responseCode
+   if (offset > 0L && code == HttpURLConnection.HTTP_OK) {
+    // Server/CDN ignored Range: restart cleanly rather than append duplicate bytes.
+    tempFile.delete()
+    totalBytes = -1L
+    connection.disconnect()
+    connection = null
+    continue
+   }
+   if (offset > 0L && code != 206) error("HTTP $code при попытке продолжить загрузку")
+   if (offset == 0L && code !in 200..299) error("HTTP $code")
+   val range = connection.getHeaderField("Content-Range")
+   if (code == 206 && range != null) {
+    totalBytes = range.substringAfterLast('/').toLongOrNull() ?: totalBytes
+   } else if (offset == 0L) {
+    totalBytes = connection.contentLengthLong
+   }
+   val mode = if (code == 206 && offset > 0L) "ab" else "wb"
+   connection.inputStream.use { input ->
+    tempFile.outputStream().buffered().let { raw ->
+     val output = if (mode == "ab") {
+      raw.close()
+      tempFile.outputStream().buffered().also { /* append stream is opened below */ }.let {
+       it.close()
+       tempFile.outputStream().buffered()
+      }
+     } else raw
+     // Use FileOutputStream append flag to preserve already downloaded bytes.
+     output.close()
+    }
+   }
+   java.io.FileOutputStream(tempFile, code == 206 && offset > 0L).buffered().use { output ->
+    connection.inputStream.use { input ->
+     val buffer = ByteArray(256 * 1024)
+     var downloaded = if (code == 206 && offset > 0L) offset else 0L
+     while (true) {
+      val count = input.read(buffer)
+      if (count < 0) break
+      output.write(buffer, 0, count)
+      downloaded += count
+      if (totalBytes > 0L) onProgress((downloaded * 100f / totalBytes).coerceIn(0f, 99.9f))
+     }
+     output.flush()
+    }
+   }
+   if (totalBytes > 0L && tempFile.length() != totalBytes) {
+    throw java.io.IOException("Получено ${tempFile.length()} из $totalBytes байт")
+   }
+   if (tempFile.length() >= 250L * 1024L * 1024L) {
+    onProgress(100f)
+    connection.disconnect()
+    return
+   }
+   throw java.io.IOException("Загрузка завершилась раньше ожидаемого размера")
+  } catch (e: Exception) {
+   lastError = e
+   // Preserve the partial file. The next attempt resumes from its current length.
+   if (attempt < 8) kotlinx.coroutines.delay((attempt * 1500L).coerceAtMost(10000L))
+  } finally {
+   connection?.disconnect()
+  }
+ }
+ throw java.io.IOException(
+  "Не удалось завершить загрузку после 8 попыток. Сохранено ${tempFile.length() / (1024 * 1024)} МБ; повторите позже — докачивание продолжится. ${lastError?.message ?: ""}",
+  lastError
+ )
 }
 
 private fun defaultPage() = """<!doctype html>
