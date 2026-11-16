@@ -205,12 +205,11 @@ private fun ChatApp() {
   task = scope.launch(dispatcher) {
    try {
     // Shorter context reduces prompt-prefill time on mobile hardware.
-    val recent = messages.dropLast(1).takeLast(2).joinToString("\n") {
-     (if (it.user) "Ты: " else "ИИ: ") + it.text.take(280)
-    }
-    val compactMemory = memory.takeLast(12).map { it.take(160) }
-    val prompt = "Память:\n" + compactMemory.joinToString("\n") { "- $it" } +
-      "\n\nПоследний контекст:\n$recent\n\nЗапрос:\n$text\n\nОтвечай по-русски, кратко и прямо. Не повторяй запрос и предыдущие ответы. Не используй Markdown или LaTeX. Не выдумывай факты."
+    // Conversation retains its own turns; re-sending them duplicates tokens and slows every request.
+    val relevantMemory = selectRelevantMemory(memory, text, 6)
+    val prompt = if (relevantMemory.isEmpty()) text else
+     "Полезная память о пользователе (используй только по теме):\\n" +
+      relevantMemory.joinToString("\\n") { "- $it" } + "\\n\\nЗапрос: $text"
     val result = StringBuilder()
     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
      val chunk = piece.toString()
@@ -255,7 +254,7 @@ private fun ChatApp() {
      }
      val convo = created.createConversation(ConversationConfig(
       systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-      samplerConfig = SamplerConfig(topK = 20, topP = 0.90, temperature = 0.62)
+      samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.58),\n      maxOutputToken = 768
      ))
      chat?.close(); engine?.close(); engine = created; chat = convo
      withContext(Dispatchers.Main) { status = "ИИ запущен локально"; busy = false; startingModel = false }
@@ -355,7 +354,7 @@ private fun ChatApp() {
        }
        val convo = created.createConversation(ConversationConfig(
         systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-        samplerConfig = SamplerConfig(topK = 20, topP = 0.92, temperature = 0.7)
+        samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.62),\n        maxOutputToken = 768
        ))
        chat?.close(); engine?.close(); engine = created; chat = convo
        withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; busy = false }
@@ -407,6 +406,19 @@ private fun ChatApp() {
   dismissButton = { TextButton(onClick = { memory = emptyList(); saveMemory() }) { Text("Очистить") } }
  )
 }
+private fun selectRelevantMemory(memory: List<String>, query: String, limit: Int): List<String> {
+ val stop = setOf("это", "как", "что", "для", "или", "мне", "меня", "тебя", "надо", "нужно", "можно", "пожалуйста", "сделай", "почему")
+ fun words(value: String) = Regex("[\\p{L}\\p{N}]{3,}").findAll(value.lowercase())
+  .map { it.value }.filterNot { it in stop }.toSet()
+ val queryWords = words(query)
+ if (queryWords.isEmpty()) return memory.takeLast(3).reversed()
+ return memory.mapIndexed { index, item ->
+  Triple(item, words(item).intersect(queryWords).size, index)
+ }.filter { it.second > 0 }
+  .sortedWith(compareByDescending<Triple<String, Int, Int>> { it.second }.thenByDescending { it.third })
+  .take(limit).map { it.first }
+}
+
 private fun cleanModelText(source: String): String {
  return source.trim().replace("```", "").replace("\\times", "×")
   .replace("\\cdot", "·").replace("**", "").replace("*", "").replace("$", "").trim()
