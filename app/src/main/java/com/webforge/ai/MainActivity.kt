@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.litertlm.*
 import kotlinx.coroutines.*
@@ -52,7 +53,7 @@ private data class Msg(val id: Long, val text: String, val user: Boolean)
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
-  setContent { MaterialTheme(colorScheme = darkColorScheme()) { ChatApp() } }
+  setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF8BFF70), onPrimary = Color(0xFF10210B), primaryContainer = Color(0xFF23451D), onPrimaryContainer = Color(0xFFD7FFCC), secondary = Color(0xFFB6F59F), tertiary = Color(0xFF8BFF70), surface = Color(0xFF171A17), background = Color(0xFF101210), surfaceVariant = Color(0xFF252A25), onSurface = Color(0xFFE7F1E3), onSurfaceVariant = Color(0xFFC1CCBC))) { ChatApp() } }
  }
 }
 
@@ -65,6 +66,7 @@ private fun ChatApp() {
  val executor = remember { Executors.newSingleThreadExecutor() }
  val dispatcher = remember { executor.asCoroutineDispatcher() }
  var model by remember { mutableStateOf(File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() }) }
+ var smartModel by remember { mutableStateOf(File(ctx.filesDir, "webforge-model-4b.litertlm").takeIf { it.exists() }) }
  var engine by remember { mutableStateOf<Engine?>(null) }
  var chat by remember { mutableStateOf<Conversation?>(null) }
  var messages by remember { mutableStateOf(readMessages(prefs)) }
@@ -89,6 +91,7 @@ private fun ChatApp() {
   else status = "Разреши доступ к микрофону в настройках Android."
  }
  val partialModel = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
+ val partialSmartModel = remember { File(ctx.filesDir, "webforge-model-4b.download") }
  val listState = rememberLazyListState()
  val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
   if (uri != null) scope.launch {
@@ -335,6 +338,51 @@ private fun ChatApp() {
      Text("${downloadProgress.toInt()}%")
     }
 
+    Spacer(Modifier.height(18.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+    Spacer(Modifier.height(12.dp))
+    Text("Умная модель • Qwen3 4B INT4", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    Text("≈ 2,17 ГБ. Используется для сложного кода и больших проектов. Для GPU требуется LiteRT-LM 0.19.0; при ошибке приложение попробует CPU.", style = MaterialTheme.typography.bodySmall)
+    Button(
+     enabled = !busy && smartModel == null,
+     modifier = Modifier.fillMaxWidth(),
+     onClick = {
+      busy = true; downloadProgress = -1f; status = "Загружаю умную модель Qwen3 4B…"
+      scope.launch {
+       try {
+        val target = withContext(Dispatchers.IO) {
+         val finalFile = File(ctx.filesDir, "webforge-model-4b.litertlm")
+         downloadModelResumable(
+          "https://huggingface.co/litert-community/Qwen3-4B/resolve/main/qwen3_4b_mixed_int4.litertlm?download=true",
+          partialSmartModel
+         ) { p -> withContext(Dispatchers.Main) { downloadProgress = p } }
+         if (finalFile.exists()) finalFile.delete()
+         check(partialSmartModel.renameTo(finalFile)) { "Не удалось сохранить Qwen3 4B" }
+         finalFile
+        }
+        smartModel = target; status = "Qwen3 4B установлена. Для переключения перезапусти модель."
+       } catch (e: Exception) { status = "Ошибка загрузки 4B: ${e.message}. Загрузка сохранена для продолжения." }
+       finally { busy = false; downloadProgress = -1f }
+      }
+     }
+    ) { Text(if (partialSmartModel.exists() && partialSmartModel.length() > 0) "Продолжить загрузку 4B" else "Скачать умную модель 4B") }
+    Text(smartModel?.let { "Qwen3 4B установлена • ${it.length() / 1048576} МБ" } ?: "Qwen3 4B пока не установлена")
+    if (smartModel != null) {
+     OutlinedButton(
+      enabled = !busy,
+      modifier = Modifier.fillMaxWidth(),
+      onClick = {
+       busy = true; status = "Переключаюсь на Qwen3 4B…"
+       scope.launch(dispatcher) {
+        try { chat?.close(); engine?.close() } catch (_: Exception) {}
+        withContext(Dispatchers.Main) {
+         chat = null; engine = null; model = smartModel
+         status = "Подготовка Qwen3 4B…"; settings = false
+        }
+       }
+      }
+     ) { Text("Перезапустить на умной модели 4B") }
+    }
     OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать файл модели .litertlm") }
     Text(model?.let { "Модель: ${it.name} • ${it.length() / 1048576} МБ" } ?: "Модель не установлена")
     Text("Файл хранится во внутренней памяти приложения. Искать его в папке «Загрузки» не нужно.")
