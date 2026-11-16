@@ -134,6 +134,7 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
  }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatApp() {
  val ctx = LocalContext.current
