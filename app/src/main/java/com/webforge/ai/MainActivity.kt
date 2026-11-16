@@ -54,6 +54,28 @@ import java.util.concurrent.Executors
 
 private data class Msg(val id: Long, val text: String, val user: Boolean)
 
+private val topicBrainColors = mapOf(
+ "tech" to Color(0xFF35CFFF),
+ "creative" to Color(0xFF55E68A),
+ "learning" to Color(0xFFB28AFF),
+ "personal" to Color(0xFFFFC15A),
+ "urgent" to Color(0xFFFF6575),
+ "default" to Color(0xFF8BFF70)
+)
+private fun detectTopicColor(messages: List<Msg>): String {
+ val text = messages.filter { it.user }.takeLast(12).joinToString(" ").lowercase()
+ if (text.isBlank()) return "default"
+ val keywords = mapOf(
+  "tech" to listOf("код", "программ", "приложен", "android", "телефон", "компьютер", "api", "сайт", "техничес", "электрон", "разработ", "ошибк", "модель", "нейросет"),
+  "creative" to listOf("дизайн", "идея", "нарис", "создай", "творч", "макет", "цвет", "декор", "оформлен", "изображен", "иллюстрац", "сцен"),
+  "learning" to listOf("учить", "обуч", "англий", "перевод", "объясни", "изуч", "урок", "исследован", "почему", "разбер"),
+  "personal" to listOf("рецепт", "еда", "погода", "поезд", "друз", "покуп", "план", "быт", "отдых", "подар"),
+  "urgent" to listOf("срочно", "опасно", "авария", "угроза", "безопасность", "критическ")
+ )
+ val scores = keywords.mapValues { (_, words) -> words.sumOf { word -> Regex(Regex.escape(word)).findAll(text).count() } }
+ return scores.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key ?: "default"
+}
+
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
@@ -74,6 +96,7 @@ private fun ChatApp() {
  var engine by remember { mutableStateOf<Engine?>(null) }
  var chat by remember { mutableStateOf<Conversation?>(null) }
  var messages by remember { mutableStateOf(readMessages(prefs)) }
+ var topicColorKey by remember { mutableStateOf(prefs.getString("topic_color", "default") ?: "default") }
  var memory by remember { mutableStateOf(readMemory(prefs)) }
  var input by remember { mutableStateOf("") }
  var status by remember { mutableStateOf(if (model != null) "Модель найдена. Автоматически запускаю…" else "Установи локальную модель в настройках.") }
@@ -231,6 +254,8 @@ private fun ChatApp() {
    memory = (memory + fact.take(500)).takeLast(100); saveMemory()
   }
   messages = messages + Msg(System.currentTimeMillis(), text, true)
+  topicColorKey = detectTopicColor(messages)
+  prefs.edit().putString("topic_color", topicColorKey).apply()
   saveChat(); input = ""
   if (chat == null) {
    messages = messages + Msg(System.currentTimeMillis() + 1, if (fact != null) "Сохранил в память. Запусти модель в настройках, чтобы продолжить общение." else "Сначала запусти локальную модель в настройках. Переписка сохранится.", false)
@@ -356,7 +381,7 @@ private fun ChatApp() {
   topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(when { chat != null -> "На устройстве • активен"; startingModel -> "Запуск локальной модели…"; model != null -> "Модель найдена • готовлю запуск"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
    IconButton(onClick = { memoryDialog = true }) { Icon(Icons.Default.Memory, "Память") }
    IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
-   IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
+   IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
   bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
    Row(verticalAlignment = Alignment.CenterVertically) {
@@ -553,7 +578,8 @@ private fun ChatApp() {
      painter = painterResource(id = R.drawable.ic_launcher),
      contentDescription = null,
      modifier = Modifier.fillMaxSize().padding(18.dp).alpha(0.10f),
-     contentScale = ContentScale.Fit
+     contentScale = ContentScale.Fit,
+     colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(topicBrainColors[topicColorKey] ?: topicBrainColors.getValue("default"))
     )
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
      items(messages, key = { it.id }) { m ->
