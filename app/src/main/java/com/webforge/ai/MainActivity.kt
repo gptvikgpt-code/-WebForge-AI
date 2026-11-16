@@ -300,20 +300,6 @@ private suspend fun downloadModelResumable(
    } else if (offset == 0L) {
     totalBytes = connection.contentLengthLong
    }
-   val mode = if (code == 206 && offset > 0L) "ab" else "wb"
-   connection.inputStream.use { input ->
-    tempFile.outputStream().buffered().let { raw ->
-     val output = if (mode == "ab") {
-      raw.close()
-      tempFile.outputStream().buffered().also { /* append stream is opened below */ }.let {
-       it.close()
-       tempFile.outputStream().buffered()
-      }
-     } else raw
-     // Use FileOutputStream append flag to preserve already downloaded bytes.
-     output.close()
-    }
-   }
    java.io.FileOutputStream(tempFile, code == 206 && offset > 0L).buffered().use { output ->
     connection.inputStream.use { input ->
      val buffer = ByteArray(256 * 1024)
