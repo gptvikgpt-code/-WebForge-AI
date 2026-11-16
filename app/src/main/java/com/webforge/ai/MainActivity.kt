@@ -472,7 +472,7 @@ private fun ChatApp() {
      }
      // Batch UI refreshes: avoid a Compose recomposition for every tiny token.
      val liveText = cleanModelText(result.toString())
-     if (liveText.length - lastUiLength >= 24 || (liveText.isNotBlank() && lastUiLength == 0)) {
+     if (liveText.length - lastUiLength >= 8 || (liveText.isNotBlank() && lastUiLength == 0)) {
       withContext(Dispatchers.Main) {
        val last = messages.lastOrNull()
        if (last?.id == responseId) {
@@ -483,12 +483,36 @@ private fun ChatApp() {
       lastUiLength = liveText.length
      }
     }
+    // A completed but empty stream is not a valid answer. Rebuild the conversation
+    // from the history before this turn and retry once, without duplicating the user message.
+    if (cleanModelText(result.toString()).isBlank()) {
+     withContext(Dispatchers.Main) { status = "Ответ не получен. Повторяю запрос…" }
+     val retryConversation = createLocalConversation(checkNotNull(engine), messages.dropLast(2))
+     try { chat?.close() } catch (_: Exception) {}
+     chat = retryConversation
+     val retryResult = StringBuilder()
+     retryConversation.sendMessageAsync(prompt).collect { piece ->
+      val chunk = piece.toString()
+      when {
+       chunk.isBlank() -> Unit
+       retryResult.isEmpty() -> retryResult.append(chunk)
+       chunk.startsWith(retryResult.toString()) -> { retryResult.setLength(0); retryResult.append(chunk) }
+       else -> retryResult.append(chunk)
+      }
+     }
+     result.setLength(0)
+     result.append(retryResult)
+    }
     withContext(Dispatchers.Main) {
-     val answer = cleanModelText(result.toString()).ifBlank { "Модель не сформировала ответ. Попробуй переформулировать запрос." }
+     val answer = cleanModelText(result.toString()).ifBlank {
+      "Локальная модель дважды вернула пустой ответ. Проверь файл модели и перезапусти её в разделе «Мозг»."
+     }
      val last = messages.lastOrNull()
      messages = if (last?.id == responseId) messages.dropLast(1) + Msg(responseId, answer, false)
       else messages + Msg(responseId, answer, false)
-     saveChat(); status = "Локальный режим • ${if (model?.name == "webforge-model-4b.litertlm") "умная 4B" else "быстрая 1.7B"} • память: ${memory.size}"
+     saveChat()
+     status = if (answer.startsWith("Локальная модель дважды")) answer
+      else "Локальный режим • ${if (model?.name == "webforge-model-4b.litertlm") "умная 4B" else "быстрая 1.7B"} • память: ${memory.size}"
      if (voiceMode) {
       if (ttsReady && tts != null) {
        val speakResult = tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
