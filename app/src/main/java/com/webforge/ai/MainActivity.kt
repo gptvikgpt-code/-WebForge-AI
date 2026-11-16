@@ -90,15 +90,19 @@ private fun detectTopicColor(messages: List<Msg>): String {
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
-  // Match Android system bars to the dark WebForge theme.
-  window.statusBarColor = android.graphics.Color.rgb(23, 26, 23)
-  window.navigationBarColor = android.graphics.Color.rgb(7, 17, 9)
+  // Transparent edge-to-edge system areas reveal the app wallpaper.
+  window.statusBarColor = android.graphics.Color.TRANSPARENT
+  window.navigationBarColor = android.graphics.Color.TRANSPARENT
+  window.setBackgroundDrawableResource(R.drawable.neural_background)
   if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
    window.isStatusBarContrastEnforced = false
    window.isNavigationBarContrastEnforced = false
   }
-  // Keep system icons light on the dark status/navigation backgrounds.
-  window.decorView.systemUiVisibility = window.decorView.systemUiVisibility and
+  window.decorView.systemUiVisibility =
+   (window.decorView.systemUiVisibility or
+    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION) and
    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and
    View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
   setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF8BFF70), onPrimary = Color(0xFF10210B), primaryContainer = Color(0xFF23451D), onPrimaryContainer = Color(0xFFD7FFCC), secondary = Color(0xFFB6F59F), tertiary = Color(0xFF8BFF70), surface = Color(0xFF171A17), background = Color(0xFF101210), surfaceVariant = Color(0xFF252A25), onSurface = Color(0xFFE7F1E3), onSurfaceVariant = Color(0xFFC1CCBC))) { ChatApp() } }
@@ -507,11 +511,17 @@ private fun ChatApp() {
  }
 
  Scaffold(
-  topBar = { TopAppBar(navigationIcon = { IconButton(onClick = { chatListDialog = true }) { Icon(Icons.Default.Menu, "Список чатов") } }, title = { Column { Text("WebForge AI"); Text(when { chat != null -> "Локальный ИИ • активен"; startingModel -> "Запуск модели…"; model != null -> "Модель установлена"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
-   IconButton(onClick = { selectedTab = "brain"; settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
-   IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
-  }) },
-  bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
+  containerColor = Color.Transparent,
+  topBar = { TopAppBar(
+   colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
+   navigationIcon = { IconButton(onClick = { chatListDialog = true }) { Icon(Icons.Default.Menu, "Список чатов") } },
+   title = { Column { Text("WebForge AI"); Text(when { chat != null -> "Локальный ИИ • активен"; startingModel -> "Запуск модели…"; model != null -> "Модель установлена"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } },
+   actions = {
+    IconButton(onClick = { selectedTab = "brain"; settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
+    IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
+   }
+  ) },
+  bottomBar = { Surface(color = Color.Transparent, tonalElevation = 0.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
    if (selectedTab == "chats") Row(verticalAlignment = Alignment.CenterVertically) {
     if (voiceMode) {
      Column(Modifier.weight(1f).padding(start = 12.dp)) {
@@ -556,7 +566,7 @@ private fun ChatApp() {
      activeWorkKind = ""
     }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
-   NavigationBar(containerColor = Color(0xFF071109)) {
+   NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
     NavigationBarItem(selected = selectedTab == "chats", onClick = { selectedTab = "chats"; settings = false }, icon = { Icon(Icons.Default.Chat, null) }, label = { Text("Чаты") })
     NavigationBarItem(selected = selectedTab == "brain", onClick = { selectedTab = "brain"; settings = true }, icon = { Icon(Icons.Default.Memory, null) }, label = { Text("Мозг") })
     NavigationBarItem(selected = selectedTab == "plugins", onClick = { selectedTab = "plugins"; settings = false }, icon = { Icon(Icons.Default.Extension, null) }, label = { Text("Плагины") })
