@@ -253,15 +253,12 @@ private fun ChatApp() {
        try { gpu.close() } catch (_: Exception) {}
        Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 6)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
       }
-     } catch (modelError: Exception) {
-      if (selectedFile.name != "webforge-model-4b.litertlm" || fastFile == null) throw modelError
-      selectedFile = fastFile
-      val fallback = Engine(EngineConfig(modelPath = selectedFile.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath))
-      replacement = fallback.also { it.initialize() }
-      withContext(Dispatchers.Main) { status = "4B не запустилась — перешёл на быструю 1.7B." }
-     }
+      } catch (modelError: Exception) {
+       // GPU failure already falls back to CPU above; preserve the selected model.
+       throw modelError
+      }
      val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
+      systemInstruction = Contents.of("Ты быстрый локальный ИИ-помощник. Отвечай быстро, точно и без лишнего текста. Сначала сразу дай ответ, не описывай ход мыслей. На простой вопрос отвечай 1–3 предложениями. На вопрос «что это» дай краткое определение и пример. Инструкции оформляй короткими шагами. Не повторяй вопрос и не начинай с вводных фраз. Если данных не хватает, задай один конкретный уточняющий вопрос. Не выдумывай факты и обозначай неопределённость. Учитывай историю и память только если они относятся к вопросу. Для сложных задач давай необходимую глубину без воды. Не утверждай, что изменяешь веса модели или обучаешь её самостоятельно."),
       samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
       maxOutputToken = 256
      ))
@@ -339,7 +336,7 @@ private fun ChatApp() {
       Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = Runtime.getRuntime().availableProcessors().coerceIn(4, 6)), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
      }
      val convo = created.createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
+      systemInstruction = Contents.of("Ты быстрый локальный ИИ-помощник. Отвечай быстро, точно и без лишнего текста. Сначала сразу дай ответ, не описывай ход мыслей. На простой вопрос отвечай 1–3 предложениями. На вопрос «что это» дай краткое определение и пример. Инструкции оформляй короткими шагами. Не повторяй вопрос и не начинай с вводных фраз. Если данных не хватает, задай один конкретный уточняющий вопрос. Не выдумывай факты и обозначай неопределённость. Учитывай историю и память только если они относятся к вопросу. Для сложных задач давай необходимую глубину без воды. Не утверждай, что изменяешь веса модели или обучаешь её самостоятельно."),
       samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.58),
       maxOutputToken = 512
      ))
@@ -518,7 +515,7 @@ private fun ChatApp() {
         Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
        }
        val convo = created.createConversation(ConversationConfig(
-        systemInstruction = Contents.of("Ты локальный ИИ-помощник. Отвечай по-русски, сразу по сути и без вступлений. Простые ответы делай краткими, сложные — структурированными. Не выдумывай факты; учитывай контекст и память. Не утверждай, что обучаешь собственные веса."),
+        systemInstruction = Contents.of("Ты быстрый локальный ИИ-помощник. Отвечай быстро, точно и без лишнего текста. Сначала сразу дай ответ, не описывай ход мыслей. На простой вопрос отвечай 1–3 предложениями. На вопрос «что это» дай краткое определение и пример. Инструкции оформляй короткими шагами. Не повторяй вопрос и не начинай с вводных фраз. Если данных не хватает, задай один конкретный уточняющий вопрос. Не выдумывай факты и обозначай неопределённость. Учитывай историю и память только если они относятся к вопросу. Для сложных задач давай необходимую глубину без воды. Не утверждай, что изменяешь веса модели или обучаешь её самостоятельно."),
         samplerConfig = SamplerConfig(topK = 8, topP = 0.80, temperature = 0.55),
         maxOutputToken = 256
        ))
