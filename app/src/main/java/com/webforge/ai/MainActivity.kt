@@ -55,7 +55,8 @@ private fun ForgeApp() {
  var conversation by remember { mutableStateOf<Conversation?>(null) }
  var prompt by remember { mutableStateOf("") }
  var html by remember { mutableStateOf(defaultPage()) }
- var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
+ val partialModelFile = remember { File(ctx.filesDir, "webforge-model.download") }
+ var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else if (partialModelFile.exists() && partialModelFile.length() > 0L) "Найдена незавершённая загрузка: ${partialModelFile.length() / (1024 * 1024)} МБ. Нажмите «Продолжить загрузку»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
  var busy by remember { mutableStateOf(false) }
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
  var preview by remember { mutableStateOf(false) }
@@ -149,7 +150,7 @@ private fun ForgeApp() {
           ) { percent ->
            withContext(Dispatchers.Main) { downloadProgress = percent }
           }
-          if (tempFile.length() < 250L * 1024L * 1024L) {
+          if (tempFile.length() < 320L * 1024L * 1024L) {
            error("Файл модели неполный: ${tempFile.length() / (1024 * 1024)} МБ. Частичная загрузка сохранена — повторите, докачивание продолжится.")
           }
           if (finalFile.exists()) finalFile.delete()
@@ -172,7 +173,7 @@ private fun ForgeApp() {
       },
       enabled = !busy && conversation == null,
       modifier = Modifier.fillMaxWidth()
-     ) { Text(if (busy) "Скачивание…" else "Скачать бесплатную модель (≈328 МБ)") }
+     ) { Text(if (busy) "Скачивание…" else if (partialModelFile.exists() && partialModelFile.length() > 0L) "Продолжить загрузку (${partialModelFile.length() / (1024 * 1024)} МБ сохранено)" else "Скачать бесплатную модель (≈328 МБ)") }
      Spacer(Modifier.height(8.dp))
      OutlinedButton(onClick = { openModel.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text(if (modelFile == null) "Выбрать файл модели .litertlm" else "Заменить файл модели") }
      Text(modelFile?.let { "Файл: ${it.name} • ${it.length() / (1024 * 1024)} МБ" } ?: "Модель ещё не установлена", style = MaterialTheme.typography.bodySmall)
@@ -317,7 +318,7 @@ private suspend fun downloadModelResumable(
    if (totalBytes > 0L && tempFile.length() != totalBytes) {
     throw java.io.IOException("Получено ${tempFile.length()} из $totalBytes байт")
    }
-   if (tempFile.length() >= 250L * 1024L * 1024L) {
+   if (tempFile.length() >= 320L * 1024L * 1024L) {
     onProgress(100f)
     connection.disconnect()
     return
