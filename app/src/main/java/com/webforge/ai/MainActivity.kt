@@ -146,6 +146,9 @@ private fun ForgeApp() {
           val connection = URL("https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true").openConnection() as HttpURLConnection
           connection.connectTimeout = 30000
           connection.readTimeout = 90000
+          connection.useCaches = false
+          connection.setRequestProperty("User-Agent", "WebForge-AI-Android/1.0")
+          connection.setRequestProperty("Accept", "application/octet-stream")
           connection.instanceFollowRedirects = true
           connection.connect()
           if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
@@ -182,11 +185,12 @@ private fun ForgeApp() {
          downloadProgress = -1f
          status = "Модель скачана: ${target.length() / (1024 * 1024)} МБ. Нажмите «Загрузить модель»."
         } catch (e: Exception) {
-         val cause = generateSequence(e as Throwable?) { it.cause }.firstOrNull { it is java.net.UnknownHostException }
-         status = if (cause != null) {
-          "Не удалось найти сервер Hugging Face (ошибка DNS). Это не загрузка: файл не передавался. Отключите VPN/фильтр DNS или смените сеть и попробуйте снова. Можно также выбрать файл .litertlm вручную."
+         val unknownHost = generateSequence(e as Throwable?) { it.cause }.filterIsInstance<java.net.UnknownHostException>().firstOrNull()
+         status = if (unknownHost != null) {
+          val failedHost = unknownHost.message?.substringAfter("host \"")?.substringBefore("\"")?.takeIf { it.isNotBlank() }
+          "Не удалось разрешить адрес ${failedHost ?: "сервера модели"} (DNS). Браузер и приложение могут идти через разные VPN-маршруты. Разрешите WebForge AI использовать VPN в настройках VPN-приложения (раздельное туннелирование), затем повторите загрузку. Также проверьте Частный DNS Android. Файл не скачан."
          } else {
-          "Ошибка скачивания модели: ${e.message ?: e.javaClass.simpleName}"
+          "Ошибка скачивания модели: ${e.message ?: e.javaClass.simpleName}. Проверьте VPN и сеть, затем повторите."
          }
         } finally { downloadProgress = -1f; busy = false }
        }
