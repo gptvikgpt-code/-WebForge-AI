@@ -95,7 +95,7 @@ class MainActivity : ComponentActivity() {
   window.navigationBarColor = android.graphics.Color.TRANSPARENT
   window.setBackgroundDrawableResource(R.drawable.neural_background)
   // Keep the neural wallpaper subtle on every screen so text and controls stay readable.
-  window.background?.alpha = 26 // approximately 10% opacity
+  window.decorView.background?.alpha = 26 // approximately 10% opacity
   if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
    window.isStatusBarContrastEnforced = false
    window.isNavigationBarContrastEnforced = false
