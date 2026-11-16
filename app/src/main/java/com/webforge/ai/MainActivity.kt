@@ -235,8 +235,10 @@ private fun ChatApp() {
   // Never switch to the 4B model automatically: loading it adds a long pause.
   // The user can still select 4B explicitly in Settings for quality-critical tasks.
   val desiredModel = model
+  val responseId = System.currentTimeMillis() + 1
+  messages = messages + Msg(responseId, "", false)
   busy = true
-  status = "Быстрый локальный режим • генерирую ответ…"
+  status = "Быстрый локальный режим • готовлю ответ…"
   activeWorkKind = "chat"
   task = scope.launch(dispatcher) {
    try {
@@ -280,19 +282,37 @@ private fun ChatApp() {
       chunk.startsWith(result.toString()) -> { result.setLength(0); result.append(chunk) }
       else -> result.append(chunk)
      }
+     val liveText = cleanModelText(result.toString())
+     withContext(Dispatchers.Main) {
+      val last = messages.lastOrNull()
+      if (last?.id == responseId) {
+       messages = messages.dropLast(1) + Msg(responseId, liveText, false)
+       if (liveText.isNotBlank()) status = "Пишу ответ…"
+      }
+     }
     }
     withContext(Dispatchers.Main) {
      val answer = cleanModelText(result.toString()).ifBlank { "Модель не сформировала ответ. Попробуй переформулировать запрос." }
-     val previous = messages.lastOrNull()
-     if (previous == null || previous.user || cleanModelText(previous.text) != answer) {
-      messages = messages + Msg(System.currentTimeMillis(), answer, false)
-     }
+     val last = messages.lastOrNull()
+     messages = if (last?.id == responseId) messages.dropLast(1) + Msg(responseId, answer, false)
+      else messages + Msg(responseId, answer, false)
      saveChat(); status = "Локальный режим • ${if (model?.name == "webforge-model-4b.litertlm") "умная 4B" else "быстрая 1.7B"} • память: ${memory.size}"
      if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
    } catch (e: CancellationException) {
-    withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Генерация остановлена.", false); saveChat() }
-   } catch (e: Exception) { withContext(Dispatchers.Main) { status = "Ошибка: ${e.message}" } }
+    withContext(Dispatchers.Main) {
+     val last = messages.lastOrNull()
+     messages = if (last?.id == responseId) messages.dropLast(1) + Msg(responseId, "Генерация остановлена.", false)
+      else messages + Msg(responseId, "Генерация остановлена.", false)
+     saveChat()
+    }
+   } catch (e: Exception) {
+    withContext(Dispatchers.Main) {
+     val last = messages.lastOrNull()
+     if (last?.id == responseId) messages = messages.dropLast(1)
+     status = "Ошибка: ${e.message}"
+    }
+   }
    finally { withContext(Dispatchers.Main) { busy = false; task = null; activeWorkKind = "" } }
   }
  }
