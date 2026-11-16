@@ -67,7 +67,7 @@ private fun ChatApp() {
  var messages by remember { mutableStateOf(readMessages(prefs)) }
  var memory by remember { mutableStateOf(readMemory(prefs)) }
  var input by remember { mutableStateOf("") }
- var status by remember { mutableStateOf(if (model != null) "Модель найдена. Запусти её в настройках." else "Установи локальную модель в настройках.") }
+ var status by remember { mutableStateOf(if (model != null) "Модель найдена. Автоматически запускаю…" else "Установи локальную модель в настройках.") }
  var busy by remember { mutableStateOf(false) }
  var startingModel by remember { mutableStateOf(false) }
  var settings by remember { mutableStateOf(false) }
@@ -244,7 +244,7 @@ private fun ChatApp() {
  }
 
  Scaffold(
-  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(if (chat != null) "На устройстве • активен" else "Модель не запущена", style = MaterialTheme.typography.labelSmall) } }, actions = {
+  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(when { chat != null -> "На устройстве • активен"; startingModel -> "Запуск локальной модели…"; model != null -> "Модель найдена • готовлю запуск"; else -> "Модель не установлена" }, style = MaterialTheme.typography.labelSmall) } }, actions = {
    IconButton(onClick = { memoryDialog = true }) { Icon(Icons.Default.Memory, "Память") }
    IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
