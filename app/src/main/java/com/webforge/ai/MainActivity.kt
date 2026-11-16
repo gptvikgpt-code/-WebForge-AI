@@ -136,19 +136,20 @@ private fun ForgeApp() {
      Button(
       onClick = {
        busy = true
-       downloadProgress = 0f
-       status = "Скачиваю бесплатную локальную модель Qwen3 0.6B…"
+       downloadProgress = -1f
+       status = "Подключаюсь к серверу модели Hugging Face…"
        scope.launch {
         try {
          val target = withContext(Dispatchers.IO) {
           val finalFile = File(ctx.filesDir, "webforge-model.litertlm")
           val tempFile = File(ctx.filesDir, "webforge-model.download")
           val connection = URL("https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true").openConnection() as HttpURLConnection
-          connection.connectTimeout = 20000
-          connection.readTimeout = 60000
+          connection.connectTimeout = 30000
+          connection.readTimeout = 90000
           connection.instanceFollowRedirects = true
           connection.connect()
           if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
+          withContext(Dispatchers.Main) { status = "Соединение установлено. Скачиваю файл модели…" }
           val expected = connection.contentLengthLong
           var downloaded = 0L
           if (expected <= 0L) withContext(Dispatchers.Main) { downloadProgress = -1f }
@@ -181,7 +182,12 @@ private fun ForgeApp() {
          downloadProgress = -1f
          status = "Модель скачана: ${target.length() / (1024 * 1024)} МБ. Нажмите «Загрузить модель»."
         } catch (e: Exception) {
-         status = "Ошибка скачивания модели: ${e.message}"
+         val cause = generateSequence(e as Throwable?) { it.cause }.firstOrNull { it is java.net.UnknownHostException }
+         status = if (cause != null) {
+          "Не удалось найти сервер Hugging Face (ошибка DNS). Это не загрузка: файл не передавался. Отключите VPN/фильтр DNS или смените сеть и попробуйте снова. Можно также выбрать файл .litertlm вручную."
+         } else {
+          "Ошибка скачивания модели: ${e.message ?: e.javaClass.simpleName}"
+         }
         } finally { downloadProgress = -1f; busy = false }
        }
       },
