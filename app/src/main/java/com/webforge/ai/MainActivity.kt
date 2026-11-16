@@ -588,7 +588,7 @@ private fun ChatApp() {
         try { chat?.close(); engine?.close() } catch (_: Exception) {}
         withContext(Dispatchers.Main) {
          chat = null; engine = null; model = smartModel
-         status = "Подготовка Qwen3 4B…"; settings = false
+         status = "Подготовка Qwen3 4B…"; settings = false; selectedTab = "chats"
         }
        }
       }
@@ -611,7 +611,7 @@ private fun ChatApp() {
     Spacer(Modifier.height(12.dp))
     if (chat != null) {
      Text("Модель уже запущена и готова к работе.", color = MaterialTheme.colorScheme.primary)
-     OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Вернуться в активный чат") }
+     OutlinedButton(onClick = { settings = false; selectedTab = "chats" }, modifier = Modifier.fillMaxWidth()) { Text("Вернуться в активный чат") }
     } else Button(enabled = !busy && model != null, modifier = Modifier.fillMaxWidth(), onClick = {
      busy = true; status = "Запускаю модель…"
      val file = model!!
@@ -629,7 +629,7 @@ private fun ChatApp() {
         maxOutputToken = 384
        ))
        chat?.close(); engine?.close(); engine = created; chat = convo
-       withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; busy = false }
+       withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; selectedTab = "chats"; busy = false }
       } catch (e: Exception) {
        try { created?.close() } catch (_: Exception) {}
        withContext(Dispatchers.Main) { status = "Не удалось запустить: ${e.message}"; busy = false }
@@ -637,7 +637,7 @@ private fun ChatApp() {
      }
     }) { Text("Запустить ИИ") }
     Text("Если модель была загружена этим приложением, она уже выбрана автоматически. Импорт файла нужен только для модели из другого источника.")
-    OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
+    OutlinedButton(onClick = { settings = false; selectedTab = "chats" }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
    }
   } else if (selectedTab == "plugins") {
    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
