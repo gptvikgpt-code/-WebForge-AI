@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION) and
    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv() and
    View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-  setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF8BFF70), onPrimary = Color(0xFF10210B), primaryContainer = Color(0xFF23451D), onPrimaryContainer = Color(0xFFD7FFCC), secondary = Color(0xFFB6F59F), tertiary = Color(0xFF8BFF70), surface = Color(0xFF171A17), background = Color(0xFF101210), surfaceVariant = Color(0xFF252A25), onSurface = Color(0xFFE7F1E3), onSurfaceVariant = Color(0xFFC1CCBC))) { ChatApp() } }
+  setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF8BFF70), onPrimary = Color(0xFF10210B), primaryContainer = Color(0xFF353B37), onPrimaryContainer = Color(0xFFE7EEE9), secondary = Color(0xFFB6F59F), tertiary = Color(0xFF8BFF70), surface = Color(0xFF171A17), background = Color(0xFF101210), surfaceVariant = Color(0xFF2B312D), onSurface = Color(0xFFE7F1E3), onSurfaceVariant = Color(0xFFC1CCBC))) { ChatApp() } }
  }
 }
 
@@ -144,7 +144,7 @@ private fun CircuitOverlay(modifier: Modifier = Modifier) {
 
 @Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
- Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+ Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF303632))) {
   Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
    Text(value, style = MaterialTheme.typography.headlineSmall, color = Color(0xFF8BFF70))
    Text(label, style = MaterialTheme.typography.labelMedium)
@@ -568,7 +568,7 @@ private fun ChatApp() {
      activeWorkKind = ""
     }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
-   NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
+   NavigationBar(containerColor = Color(0xCC252B27), tonalElevation = 0.dp) {
     NavigationBarItem(selected = selectedTab == "chats", onClick = { selectedTab = "chats"; settings = false }, icon = { Icon(Icons.Default.Chat, null) }, label = { Text("Чаты") })
     NavigationBarItem(selected = selectedTab == "brain", onClick = { selectedTab = "brain"; settings = true }, icon = { Icon(Icons.Default.Memory, null) }, label = { Text("Мозг") })
     NavigationBarItem(selected = selectedTab == "plugins", onClick = { selectedTab = "plugins"; settings = false }, icon = { Icon(Icons.Default.Extension, null) }, label = { Text("Плагины") })
@@ -785,12 +785,11 @@ private fun ChatApp() {
      contentDescription = null,
      modifier = Modifier.fillMaxSize().padding(18.dp).alpha(0.10f),
      contentScale = ContentScale.Crop,
-     colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(topicBrainColors[topicColorKey] ?: topicBrainColors.getValue("default"))
     )
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
      items(messages, key = { it.id }) { m ->
       Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.user) Arrangement.End else Arrangement.Start) {
-       Surface(color = if (m.user) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.94f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f), shape = RoundedCornerShape(18.dp), modifier = Modifier.widthIn(max = 330.dp)) {
+       Surface(color = if (m.user) Color(0xE638403A) else Color(0xE62B312D), shape = RoundedCornerShape(18.dp), modifier = Modifier.widthIn(max = 330.dp)) {
         Text(m.text, Modifier.padding(13.dp), color = if (m.user) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
        }
       }
