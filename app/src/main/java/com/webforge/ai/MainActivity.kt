@@ -32,6 +32,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
@@ -115,7 +117,53 @@ private fun ForgeApp() {
      Spacer(Modifier.height(8.dp))
      Text("Модель работает прямо на телефоне. Аккаунт, API-ключ и платная подписка не требуются. Модель скачивается отдельно и хранится на устройстве.")
      Spacer(Modifier.height(12.dp))
-     Text("Стартовая модель: Qwen3 0.6B LiteRT-LM (около 600 МБ). Для сложного программирования компактная модель может ошибаться.")
+     Text("Стартовая модель: Qwen3 0.6B LiteRT-LM. Файл около 328 МБ. Скачивается один раз, затем генерация выполняется на телефоне без интернета.")
+     Spacer(Modifier.height(8.dp))
+     Button(
+      onClick = {
+       busy = true
+       status = "Скачиваю бесплатную локальную модель Qwen3 0.6B…"
+       scope.launch {
+        try {
+         val target = withContext(Dispatchers.IO) {
+          val finalFile = File(ctx.filesDir, "webforge-model.litertlm")
+          val tempFile = File(ctx.filesDir, "webforge-model.download")
+          val connection = URL("https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true").openConnection() as HttpURLConnection
+          connection.connectTimeout = 20000
+          connection.readTimeout = 60000
+          connection.instanceFollowRedirects = true
+          connection.connect()
+          if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
+          val expected = connection.contentLengthLong
+          connection.inputStream.use { input ->
+           tempFile.outputStream().buffered().use { output ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+             val count = input.read(buffer)
+             if (count < 0) break
+             output.write(buffer, 0, count)
+            }
+           }
+          }
+          connection.disconnect()
+          if (tempFile.length() < 250L * 1024L * 1024L || (expected > 0 && tempFile.length() != expected)) {
+           tempFile.delete()
+           error("Файл модели скачан не полностью")
+          }
+          if (finalFile.exists()) finalFile.delete()
+          if (!tempFile.renameTo(finalFile)) error("Не удалось сохранить модель")
+          finalFile
+         }
+         modelFile = target
+         status = "Модель скачана: ${target.length() / (1024 * 1024)} МБ. Нажмите «Загрузить модель»."
+        } catch (e: Exception) {
+         status = "Ошибка скачивания модели: ${e.message}"
+        } finally { busy = false }
+       }
+      },
+      enabled = !busy && conversation == null,
+      modifier = Modifier.fillMaxWidth()
+     ) { Text(if (busy) "Скачивание…" else "Скачать бесплатную модель (≈328 МБ)") }
      Spacer(Modifier.height(8.dp))
      OutlinedButton(onClick = { openModel.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text(if (modelFile == null) "Выбрать файл модели .litertlm" else "Заменить файл модели") }
      Text(modelFile?.let { "Файл: ${it.name} • ${it.length() / (1024 * 1024)} МБ" } ?: "Модель ещё не установлена", style = MaterialTheme.typography.bodySmall)
@@ -127,9 +175,11 @@ private fun ForgeApp() {
       status = "Загружаю локальную модель. Первый запуск может занять время…"
       scope.launch(modelDispatcher) {
        var created: Engine? = null
+       var initialized = false
        try {
         created = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(), cacheDir = ctx.cacheDir.absolutePath))
         created.initialize()
+        initialized = true
         val newConversation = created.createConversation(ConversationConfig(
          systemInstruction = Contents.of("Ты WebForge AI — автономный помощник разработчика. Создавай полноценные адаптивные веб-проекты. На запрос о сайте или игре возвращай только полный HTML-документ с CSS и JavaScript внутри, без markdown-ограждений. Все кнопки должны работать. Интерфейс на русском.")
         ))
@@ -139,7 +189,7 @@ private fun ForgeApp() {
         conversation = newConversation
         withContext(Dispatchers.Main) { status = "Локальная модель готова. Можно работать без интернета."; busy = false }
        } catch (e: Exception) {
-        try { created?.close() } catch (_: Exception) {}
+        if (initialized) try { created?.close() } catch (_: Exception) {}
         withContext(Dispatchers.Main) { status = "Не удалось загрузить модель: ${e.message}"; busy = false }
        }
       }
