@@ -146,7 +146,7 @@ private fun ForgeApp() {
         try {
          val target = withContext(Dispatchers.IO) {
           val finalFile = File(ctx.filesDir, "webforge-model.litertlm")
-          val tempFile = File(ctx.filesDir, "webforge-model.download")
+          val tempFile = File(ctx.filesDir, "webforge-model-1.7b.download")
           downloadModelResumable(
            "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm?download=true",
            tempFile
