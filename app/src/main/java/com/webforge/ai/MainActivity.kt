@@ -205,9 +205,11 @@ private fun ChatApp() {
   }
   val isComplex = isComplexPrompt(text)
   val fastFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() }
+  // Keep the currently loaded model between requests. Reinitializing a multi-GB
+  // model can take several seconds; switch to 4B only when a complex task needs it.
+  // Do not switch back to 1.7B automatically after every short follow-up.
   val desiredModel = when {
-   isComplex && smartModel != null -> smartModel
-   !isComplex && model?.name == "webforge-model-4b.litertlm" && fastFile != null -> fastFile
+   isComplex && smartModel != null && model?.name != "webforge-model-4b.litertlm" -> smartModel
    else -> model
   }
   busy = true
