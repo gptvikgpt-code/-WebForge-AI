@@ -1,7 +1,15 @@
 package com.webforge.ai
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -63,6 +73,15 @@ private fun ChatApp() {
  var memoryDialog by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
+ var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+ var listening by remember { mutableStateOf(false) }
+ var pendingSpeechIntent by remember { mutableStateOf<Intent?>(null) }
+ val submitVoice = remember { arrayOfNulls<() -> Unit>(1) }
+ var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+ val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+  if (granted) pendingSpeechIntent?.let { speechRecognizer?.startListening(it); listening = true }
+  else status = "Разреши доступ к микрофону в настройках Android."
+ }
  val partialModel = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
  val listState = rememberLazyListState()
  val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -80,8 +99,14 @@ private fun ChatApp() {
    finally { busy = false }
   }
  }
+ DisposableEffect(ctx) {
+  val speaker = TextToSpeech(ctx) { result -> if (result == TextToSpeech.SUCCESS) tts?.language = Locale("ru", "RU") }
+  tts = speaker
+  onDispose { try { speaker.stop(); speaker.shutdown() } catch (_: Exception) {}; tts = null }
+ }
  DisposableEffect(Unit) {
   onDispose {
+   try { speechRecognizer?.destroy() } catch (_: Exception) {}
    executor.execute { try { chat?.close() } catch (_: Exception) {}; try { engine?.close() } catch (_: Exception) {} }
    executor.shutdown()
   }
@@ -94,6 +119,39 @@ private fun ChatApp() {
   prefs.edit().putString("messages", a.toString()).apply()
  }
  fun saveMemory() { prefs.edit().putString("memory", JSONArray(memory).toString()).apply() }
+ fun beginVoiceInput() {
+  if (!SpeechRecognizer.isRecognitionAvailable(ctx)) { status = "На устройстве нет службы распознавания речи."; return }
+  try {
+   speechRecognizer?.destroy()
+   val recognizer = SpeechRecognizer.createSpeechRecognizer(ctx)
+   speechRecognizer = recognizer
+   recognizer.setRecognitionListener(object : RecognitionListener {
+    override fun onReadyForSpeech(params: Bundle?) { listening = true; status = "Слушаю… говори." }
+    override fun onBeginningOfSpeech() { listening = true }
+    override fun onRmsChanged(rmsdB: Float) {}
+    override fun onBufferReceived(buffer: ByteArray?) {}
+    override fun onEndOfSpeech() { listening = false; status = "Обрабатываю речь…" }
+    override fun onError(error: Int) { listening = false; status = "Не удалось распознать речь (код $error). Нажми микрофон и попробуй ещё раз." }
+    override fun onResults(results: Bundle?) {
+     listening = false
+     val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+     if (spoken.isNotBlank()) { input = spoken; submitVoice[0]?.invoke() } else status = "Речь не распознана. Попробуй ещё раз."
+    }
+    override fun onPartialResults(partialResults: Bundle?) {}
+    override fun onEvent(eventType: Int, params: Bundle?) {}
+   })
+   val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
+    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+   }
+   pendingSpeechIntent = intent
+   if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+    recognizer.startListening(intent); listening = true
+   } else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+  } catch (e: Exception) { listening = false; status = "Ошибка микрофона: ${e.message}" }
+ }
  fun send() {
   val text = input.trim()
   if (text.isBlank() || busy) return
@@ -129,8 +187,10 @@ private fun ChatApp() {
     val result = StringBuilder()
     checkNotNull(chat).sendMessageAsync(prompt).collect { result.append(it.toString()) }
     withContext(Dispatchers.Main) {
-     messages = messages + Msg(System.currentTimeMillis(), result.toString().trim().ifBlank { "Пустой ответ модели." }, false)
+     val answer = result.toString().trim().ifBlank { "Пустой ответ модели." }
+     messages = messages + Msg(System.currentTimeMillis(), answer, false)
      saveChat(); status = "Локальный режим • записей памяти: ${memory.size}"
+     tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
    } catch (e: CancellationException) {
     withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Ответ остановлен.", false); saveChat() }
@@ -138,6 +198,7 @@ private fun ChatApp() {
    finally { withContext(Dispatchers.Main) { busy = false; task = null } }
   }
  }
+ submitVoice[0] = { send() }
 
  Scaffold(
   topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(if (chat != null) "На устройстве • активен" else "Модель не запущена", style = MaterialTheme.typography.labelSmall) } }, actions = {
@@ -145,9 +206,10 @@ private fun ChatApp() {
    IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
-  bottomBar = { Surface(tonalElevation = 3.dp) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
+  bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
    Row(verticalAlignment = Alignment.Bottom) {
-    OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
+    OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (listening) "Слушаю…" else "Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
+    IconButton(onClick = { if (listening) { speechRecognizer?.stopListening(); listening = false } else beginVoiceInput() }, enabled = !busy) { Icon(if (listening) Icons.Default.MicOff else Icons.Default.Mic, if (listening) "Остановить микрофон" else "Голосовой ввод") }
     IconButton(onClick = { send() }, enabled = input.isNotBlank() && !busy) { Icon(Icons.Default.Send, "Отправить") }
    }
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,8 +254,12 @@ private fun ChatApp() {
 
     OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать файл модели .litertlm") }
     Text(model?.let { "Модель: ${it.name} • ${it.length() / 1048576} МБ" } ?: "Модель не установлена")
+    Text("Файл хранится во внутренней памяти приложения. Искать его в папке «Загрузки» не нужно.")
     Spacer(Modifier.height(12.dp))
-    Button(enabled = !busy && model != null && chat == null, modifier = Modifier.fillMaxWidth(), onClick = {
+    if (chat != null) {
+     Text("Модель уже запущена и готова к работе.", color = MaterialTheme.colorScheme.primary)
+     OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Вернуться в активный чат") }
+    } else Button(enabled = !busy && model != null, modifier = Modifier.fillMaxWidth(), onClick = {
      busy = true; status = "Запускаю модель…"
      val file = model!!
      scope.launch(dispatcher) {
@@ -216,7 +282,7 @@ private fun ChatApp() {
       }
      }
     }) { Text("Запустить ИИ") }
-    Text("Если файл модели уже установлен в старой версии WebForge AI, выбери его через файловый менеджер.")
+    Text("Если модель была загружена этим приложением, она уже выбрана автоматически. Импорт файла нужен только для модели из другого источника.")
     OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
    }
   } else if (messages.isEmpty()) {
