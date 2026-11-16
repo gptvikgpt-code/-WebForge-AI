@@ -577,6 +577,7 @@ private fun ChatApp() {
   } } }
  ) { pad ->
   if (settings || selectedTab == "brain") {
+   CompositionLocalProvider(LocalContentColor provides Color(0xFF737D75)) {
    Column(Modifier.fillMaxSize().padding(pad).padding(18.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
     Text("Локальная модель", style = MaterialTheme.typography.headlineSmall)
     Text("Qwen3 1.7B в 4-битной квантовке. После установки модель отвечает прямо на телефоне, без API и аккаунта.")
@@ -698,6 +699,7 @@ private fun ChatApp() {
     }) { Text("Запустить ИИ") }
     Text("Если модель была загружена этим приложением, она уже выбрана автоматически. Импорт файла нужен только для модели из другого источника.")
     OutlinedButton(onClick = { settings = false; selectedTab = "chats" }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
+   }
    }
   } else if (selectedTab == "plugins") {
    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
