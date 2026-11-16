@@ -2,365 +2,312 @@ package com.webforge.ai
 
 import android.net.Uri
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Preview
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.ConversationConfig
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.SamplerConfig
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.Dispatchers
+import com.google.ai.edge.litertlm.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
+private data class Msg(val id: Long, val text: String, val user: Boolean)
+
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
-  setContent { MaterialTheme(colorScheme = darkColorScheme()) { ForgeApp() } }
+  setContent { MaterialTheme(colorScheme = darkColorScheme()) { ChatApp() } }
  }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ForgeApp() {
+private fun ChatApp() {
  val ctx = LocalContext.current
+ val prefs = remember { ctx.getSharedPreferences("local_chat", 0) }
  val scope = rememberCoroutineScope()
  val executor = remember { Executors.newSingleThreadExecutor() }
- val modelDispatcher = remember { executor.asCoroutineDispatcher() }
- var modelFile by remember { mutableStateOf((File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() } ?: File(ctx.filesDir, "webforge-model.litertlm").takeIf { it.exists() })) }
+ val dispatcher = remember { executor.asCoroutineDispatcher() }
+ var model by remember { mutableStateOf(File(ctx.filesDir, "webforge-model-1.7b.litertlm").takeIf { it.exists() }) }
  var engine by remember { mutableStateOf<Engine?>(null) }
- var conversation by remember { mutableStateOf<Conversation?>(null) }
- var prompt by remember { mutableStateOf("") }
- var html by remember { mutableStateOf(defaultPage()) }
- val partialModelFile = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
- var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else if (partialModelFile.exists() && partialModelFile.length() > 0L) "Найдена незавершённая загрузка: ${partialModelFile.length() / (1024 * 1024)} МБ. Нажмите «Продолжить загрузку»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
+ var chat by remember { mutableStateOf<Conversation?>(null) }
+ var messages by remember { mutableStateOf(readMessages(prefs)) }
+ var memory by remember { mutableStateOf(readMemory(prefs)) }
+ var input by remember { mutableStateOf("") }
+ var status by remember { mutableStateOf(if (model != null) "Модель найдена. Запусти её в настройках." else "Установи локальную модель в настройках.") }
  var busy by remember { mutableStateOf(false) }
- var generationJob by remember { mutableStateOf<Job?>(null) }
+ var settings by remember { mutableStateOf(false) }
+ var memoryDialog by remember { mutableStateOf(false) }
+ var task by remember { mutableStateOf<Job?>(null) }
  var downloadProgress by remember { mutableFloatStateOf(-1f) }
- var preview by remember { mutableStateOf(false) }
- var showSettings by remember { mutableStateOf(false) }
-
- val openModel = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-  if (uri != null) {
-   busy = true
-   status = "Копирую модель в память приложения…"
-   scope.launch {
-    try {
-     val copied = withContext(Dispatchers.IO) {
-      val target = File(ctx.filesDir, "webforge-model-1.7b.litertlm")
-      ctx.contentResolver.openInputStream(uri).use { input ->
-       requireNotNull(input) { "Не удалось открыть файл модели" }.copyTo(target.outputStream())
-      }
-      target
-     }
-     modelFile = copied
-     status = "Модель скопирована (${copied.length() / (1024 * 1024)} МБ). Теперь загрузите её."
-    } catch (e: Exception) { status = "Ошибка импорта модели: ${e.message}" }
-    finally { busy = false }
-   }
-  }
- }
- val saveHtml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/html")) { uri ->
+ val partialModel = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
+ val listState = rememberLazyListState()
+ val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
   if (uri != null) scope.launch {
+   busy = true
    try {
-    withContext(Dispatchers.IO) {
-     ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(html) } ?: error("Не удалось сохранить файл")
+    val target = withContext(Dispatchers.IO) {
+     File(ctx.filesDir, "webforge-model-1.7b.litertlm").also { f ->
+      ctx.contentResolver.openInputStream(uri).use { it!!.copyTo(f.outputStream()) }
+     }
     }
-    status = "HTML-проект сохранён."
-   } catch (e: Exception) { status = "Ошибка сохранения: ${e.message}" }
+    model = target
+    status = "Модель скопирована: ${target.length() / 1048576} МБ"
+   } catch (e: Exception) { status = "Ошибка импорта: ${e.message}" }
+   finally { busy = false }
   }
  }
-
  DisposableEffect(Unit) {
   onDispose {
-   executor.execute {
-    try { conversation?.close() } catch (_: Exception) {}
-    try { engine?.close() } catch (_: Exception) {}
-   }
+   executor.execute { try { chat?.close() } catch (_: Exception) {}; try { engine?.close() } catch (_: Exception) {} }
    executor.shutdown()
+  }
+ }
+ LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+
+ fun saveChat() {
+  val a = JSONArray()
+  messages.takeLast(300).forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("user", it.user)) }
+  prefs.edit().putString("messages", a.toString()).apply()
+ }
+ fun saveMemory() { prefs.edit().putString("memory", JSONArray(memory).toString()).apply() }
+ fun send() {
+  val text = input.trim()
+  if (text.isBlank() || busy) return
+  if (text.equals("забудь всё", true) || text.equals("очисти память", true)) {
+   memory = emptyList(); saveMemory()
+   messages = messages + Msg(System.currentTimeMillis(), "Локальная память очищена.", false)
+   input = ""; saveChat(); return
+  }
+  val low = text.lowercase()
+  val explicit = listOf("запомни:", "запомни ", "сохрани в памяти:")
+  val adaptive = listOf("я предпочитаю", "мне нравится", "мне не нравится", "в дальнейшем", "всегда ", "не делай так", "мне нужно")
+  val fact = when {
+   explicit.any { low.startsWith(it) } -> text.substringAfter(":").ifBlank { text.substringAfter(" ") }.trim()
+   adaptive.any { low.contains(it) } -> text
+   else -> null
+  }
+  if (!fact.isNullOrBlank() && memory.none { it.equals(fact, true) }) {
+   memory = (memory + fact.take(500)).takeLast(100); saveMemory()
+  }
+  messages = messages + Msg(System.currentTimeMillis(), text, true)
+  saveChat(); input = ""
+  if (chat == null) {
+   messages = messages + Msg(System.currentTimeMillis() + 1, if (fact != null) "Сохранил в память. Запусти модель в настройках, чтобы продолжить общение." else "Сначала запусти локальную модель в настройках. Переписка сохранится.", false)
+   saveChat(); return
+  }
+  busy = true
+  status = if (fact != null) "Записал в память • думаю…" else "Думаю локально…"
+  task = scope.launch(dispatcher) {
+   try {
+    val recent = messages.dropLast(1).takeLast(8).joinToString("\n") { (if (it.user) "Ты: " else "ИИ: ") + it.text.take(900) }
+    val prompt = "Локальная память пользователя:\n" + memory.joinToString("\n") { "- $it" } +
+      "\n\nНедавний разговор:\n$recent\n\nСообщение пользователя:\n$text\n\nОтвечай на русском, учитывай память и контекст. Не выдумывай факты."
+    val result = StringBuilder()
+    checkNotNull(chat).sendMessageAsync(prompt).collect { result.append(it.toString()) }
+    withContext(Dispatchers.Main) {
+     messages = messages + Msg(System.currentTimeMillis(), result.toString().trim().ifBlank { "Пустой ответ модели." }, false)
+     saveChat(); status = "Локальный режим • записей памяти: ${memory.size}"
+    }
+   } catch (e: CancellationException) {
+    withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Ответ остановлен.", false); saveChat() }
+   } catch (e: Exception) { withContext(Dispatchers.Main) { status = "Ошибка: ${e.message}" } }
+   finally { withContext(Dispatchers.Main) { busy = false; task = null } }
   }
  }
 
  Scaffold(
-  topBar = { TopAppBar(title = { Text("WebForge AI") }, actions = {
-   IconButton(onClick = { showSettings = !showSettings; preview = false }) { Icon(Icons.Default.Settings, contentDescription = "Модель") }
+  topBar = { TopAppBar(title = { Column { Text("Локальный ИИ"); Text(if (chat != null) "На устройстве • активен" else "Модель не запущена", style = MaterialTheme.typography.labelSmall) } }, actions = {
+   IconButton(onClick = { memoryDialog = true }) { Icon(Icons.Default.Memory, "Память") }
+   IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
+   IconButton(onClick = { messages = emptyList(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
-  bottomBar = { NavigationBar {
-   NavigationBarItem(selected = !preview && !showSettings, onClick = { preview = false; showSettings = false }, icon = { Icon(Icons.Default.Code, null) }, label = { Text("Создание") })
-   NavigationBarItem(selected = preview, onClick = { preview = true; showSettings = false }, icon = { Icon(Icons.Default.Preview, null) }, label = { Text("Просмотр") })
-  } }
+  bottomBar = { Surface(tonalElevation = 3.dp) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
+   Row(verticalAlignment = Alignment.Bottom) {
+    OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
+    IconButton(onClick = { send() }, enabled = input.isNotBlank() && !busy) { Icon(Icons.Default.Send, "Отправить") }
+   }
+   if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
+    LinearProgressIndicator(Modifier.weight(1f))
+    TextButton(onClick = { task?.cancel() }) { Text("Стоп") }
+   } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+  } } }
  ) { pad ->
-  Column(Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
-   if (busy) {
+  if (settings) {
+   Column(Modifier.fillMaxSize().padding(pad).padding(18.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+    Text("Локальная модель", style = MaterialTheme.typography.headlineSmall)
+    Text("Qwen3 1.7B в 4-битной квантовке. После установки модель отвечает прямо на телефоне, без API и аккаунта.")
+    Spacer(Modifier.height(12.dp))
+
+    Button(
+     enabled = !busy && chat == null,
+     modifier = Modifier.fillMaxWidth(),
+     onClick = {
+      busy = true; downloadProgress = -1f; status = "Подключаюсь к Hugging Face…"
+      scope.launch {
+       try {
+        val target = withContext(Dispatchers.IO) {
+         val finalFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm")
+         downloadModelResumable(
+          "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm?download=true",
+          partialModel
+         ) { p -> withContext(Dispatchers.Main) { downloadProgress = p } }
+         if (finalFile.exists()) finalFile.delete()
+         check(partialModel.renameTo(finalFile)) { "Не удалось сохранить модель" }
+         finalFile
+        }
+        model = target; status = "Модель скачана. Нажми «Запустить ИИ»."
+       } catch (e: Exception) { status = "Ошибка загрузки: ${e.message}. Частичный файл сохранён, повтори позже." }
+       finally { busy = false; downloadProgress = -1f }
+      }
+     }
+    ) { Text(if (partialModel.exists() && partialModel.length() > 0) "Продолжить загрузку модели" else "Скачать Qwen3 1.7B (≈932 МБ)") }
     if (downloadProgress >= 0f) {
      LinearProgressIndicator(progress = { downloadProgress / 100f }, modifier = Modifier.fillMaxWidth())
-     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-      Text(status, style = MaterialTheme.typography.bodySmall)
-      Text("${downloadProgress.toInt()}%", style = MaterialTheme.typography.labelLarge)
-     }
-    } else {
-     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-     Text(status, style = MaterialTheme.typography.bodySmall)
+     Text("${downloadProgress.toInt()}%")
     }
-    Spacer(Modifier.height(10.dp))
+
+    OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать файл модели .litertlm") }
+    Text(model?.let { "Модель: ${it.name} • ${it.length() / 1048576} МБ" } ?: "Модель не установлена")
+    Spacer(Modifier.height(12.dp))
+    Button(enabled = !busy && model != null && chat == null, modifier = Modifier.fillMaxWidth(), onClick = {
+     busy = true; status = "Запускаю модель…"
+     val file = model!!
+     scope.launch(dispatcher) {
+      var created: Engine? = null
+      try {
+       val gpu = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
+       created = try { gpu.initialize(); gpu } catch (_: Exception) {
+        try { gpu.close() } catch (_: Exception) {}
+        Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
+       }
+       val convo = created.createConversation(ConversationConfig(
+        systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+        samplerConfig = SamplerConfig(topK = 20, topP = 0.92, temperature = 0.7)
+       ))
+       chat?.close(); engine?.close(); engine = created; chat = convo
+       withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; busy = false }
+      } catch (e: Exception) {
+       try { created?.close() } catch (_: Exception) {}
+       withContext(Dispatchers.Main) { status = "Не удалось запустить: ${e.message}"; busy = false }
+      }
+     }
+    }) { Text("Запустить ИИ") }
+    Text("Если файл модели уже установлен в старой версии WebForge AI, выбери его через файловый менеджер.")
+    OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
    }
-   when {
-    showSettings -> {
-     Text("Локальный ИИ", style = MaterialTheme.typography.headlineSmall)
-     Spacer(Modifier.height(8.dp))
-     Text("Модель работает прямо на телефоне. Аккаунт, API-ключ и платная подписка не требуются. Модель скачивается отдельно и хранится на устройстве.")
-     Spacer(Modifier.height(12.dp))
-     Text("Улучшенная модель: Qwen3 1.7B в 4-битной квантовке (около 932 МБ). Она заметно сильнее базовой 0.6B. Приложение сначала попробует ускорение GPU, а если оно несовместимо — автоматически переключится на CPU. Модель работает локально, без аккаунта и API-ключа.")
-     Spacer(Modifier.height(8.dp))
-     Button(
-      onClick = {
-       busy = true
-       downloadProgress = -1f
-       status = "Подключаюсь к серверу модели Hugging Face…"
-       scope.launch {
-        try {
-         val target = withContext(Dispatchers.IO) {
-          val finalFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm")
-          val tempFile = File(ctx.filesDir, "webforge-model-1.7b.download")
-          downloadModelResumable(
-           "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm?download=true",
-           tempFile
-          ) { percent ->
-           withContext(Dispatchers.Main) { downloadProgress = percent }
-          }
-          if (tempFile.length() < 850L * 1024L * 1024L) {
-           error("Файл модели неполный: ${tempFile.length() / (1024 * 1024)} МБ. Частичная загрузка сохранена — повторите, докачивание продолжится.")
-          }
-          if (finalFile.exists()) finalFile.delete()
-          if (!tempFile.renameTo(finalFile)) error("Не удалось сохранить модель")
-          finalFile
-         }
-         modelFile = target
-         downloadProgress = -1f
-         status = "Qwen3 1.7B скачана: ${target.length() / (1024 * 1024)} МБ. Нажмите «Загрузить модель»."
-        } catch (e: Exception) {
-         val unknownHost = generateSequence(e as Throwable?) { it.cause }.filterIsInstance<java.net.UnknownHostException>().firstOrNull()
-         status = if (unknownHost != null) {
-          val failedHost = unknownHost.message?.substringAfter("host \"")?.substringBefore("\"")?.takeIf { it.isNotBlank() }
-          "Не удалось разрешить адрес ${failedHost ?: "сервера модели"} (DNS). Браузер и приложение могут идти через разные VPN-маршруты. Разрешите WebForge AI использовать VPN в настройках VPN-приложения (раздельное туннелирование), затем повторите загрузку. Также проверьте Частный DNS Android. Файл не скачан."
-         } else {
-          "Ошибка скачивания модели: ${e.message ?: e.javaClass.simpleName}. Проверьте VPN и сеть, затем повторите."
-         }
-        } finally { downloadProgress = -1f; busy = false }
-       }
-      },
-      enabled = !busy && conversation == null,
-      modifier = Modifier.fillMaxWidth()
-     ) { Text(if (busy) "Скачивание…" else if (partialModelFile.exists() && partialModelFile.length() > 0L) "Продолжить загрузку (${partialModelFile.length() / (1024 * 1024)} МБ сохранено)" else "Скачать умную модель Qwen3 1.7B (≈932 МБ)") }
-     Spacer(Modifier.height(8.dp))
-     OutlinedButton(onClick = { openModel.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text(if (modelFile == null) "Выбрать файл модели .litertlm" else "Заменить файл модели") }
-     Text(modelFile?.let { "Файл: ${it.name} • ${it.length() / (1024 * 1024)} МБ" } ?: "Модель ещё не установлена", style = MaterialTheme.typography.bodySmall)
-     Spacer(Modifier.height(8.dp))
-     Button(onClick = {
-      val file = modelFile
-      if (file == null) { status = "Сначала выберите файл .litertlm."; return@Button }
-      busy = true
-      status = "Загружаю локальную модель. Первый запуск может занять время…"
-      scope.launch(modelDispatcher) {
-       var created: Engine? = null
-       var initialized = false
-       try {
-        created = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.GPU(), cacheDir = ctx.cacheDir.absolutePath))
-        try {
-         created.initialize()
-         initialized = true
-        } catch (gpuError: Exception) {
-         // Some Mali/OpenCL drivers do not support every model operation. Retry safely on CPU.
-         created = null
-         val cpuEngine = Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath))
-         cpuEngine.initialize()
-         created = cpuEngine
-         initialized = true
-        }
-        val newConversation = created.createConversation(ConversationConfig(
-         systemInstruction = Contents.of("Ты WebForge AI — опытный senior full-stack разработчик, архитектор и технический консультант. Твоя задача — превращать краткие идеи пользователя в качественные, законченные и запускаемые веб-приложения и игры. Всегда анализируй требования до генерации, продумывай структуру, состояния, сценарии пользователя и обработку ошибок. Пиши современный, чистый, безопасный и поддерживаемый HTML/CSS/JavaScript. Делай mobile-first адаптивную вёрстку, учитывай сенсорное управление и небольшие экраны. Все кнопки, формы, меню, игровые механики и переключатели должны реально работать; не оставляй заглушки и TODO. Проверяй синтаксис, связи между элементами, обработчики событий, размеры и переполнение. Не выдумывай библиотеки или API. Если задача требует одного файла — возвращай полный самодостаточный HTML-документ со встроенными CSS и JS, без Markdown-ограждений и пояснений вокруг кода. Если пользователь просит изменить существующий проект, сохраняй уже работающие функции и меняй только необходимое. Если данных не хватает, выбирай разумные значения по умолчанию и явно обозначай допущения в обычном чате. Отвечай по-русски, кратко и технически точно."),
-         samplerConfig = SamplerConfig(topK = 20, topP = 0.95, temperature = 0.6)
-        ))
-        conversation?.close()
-        engine?.close()
-        engine = created
-        conversation = newConversation
-        withContext(Dispatchers.Main) { status = "Умная модель Qwen3 1.7B готова. GPU ускорение включено, если драйвер поддержал его; иначе используется CPU."; busy = false }
-       } catch (e: Exception) {
-        if (initialized) try { created?.close() } catch (_: Exception) {}
-        withContext(Dispatchers.Main) { status = "Не удалось загрузить модель: ${e.message}"; busy = false }
-       }
-      }
-     }, enabled = !busy && modelFile != null && conversation == null, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Загрузка…" else "Загрузить модель") }
-     if (conversation != null) Text("Модель активна в памяти приложения.", color = MaterialTheme.colorScheme.primary)
-     Spacer(Modifier.height(8.dp))
-     Text(status, style = MaterialTheme.typography.bodySmall)
+  } else if (messages.isEmpty()) {
+   Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
+     Icon(Icons.Default.Memory, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+     Text("Твой локальный ИИ", style = MaterialTheme.typography.headlineSmall)
+     Text("Общайся, исправляй ответы и сохраняй важное в память. Данные остаются на телефоне.", textAlign = TextAlign.Center)
+     Text("Попробуй: «Запомни: я работаю декоратором»", style = MaterialTheme.typography.bodySmall)
     }
-    preview -> {
-     Text("Предпросмотр", style = MaterialTheme.typography.titleLarge)
-     Spacer(Modifier.height(8.dp))
-     AndroidView(modifier = Modifier.fillMaxWidth().heightIn(min = 500.dp), factory = { WebView(it).apply {
-      settings.javaScriptEnabled = true
-      settings.domStorageEnabled = true
-      webViewClient = WebViewClient()
-      loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
-     } }, update = { it.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null) })
-     Spacer(Modifier.height(8.dp))
-     OutlinedButton(onClick = { saveHtml.launch("webforge-project.html") }, modifier = Modifier.fillMaxWidth()) { Text("Сохранить HTML-проект") }
-    }
-    else -> {
-     Text("Что создаём?", style = MaterialTheme.typography.headlineSmall)
-     Spacer(Modifier.height(8.dp))
-     Text("Опишите сайт, приложение или игру. Локальная модель подготовит HTML, CSS и JavaScript.")
-     Spacer(Modifier.height(12.dp))
-     OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp), minLines = 5, label = { Text("Опишите идею") })
-     Spacer(Modifier.height(12.dp))
-     Button(enabled = !busy && prompt.isNotBlank() && conversation != null, onClick = {
-      busy = true
-      status = "Локальный ИИ создаёт проект…"
-      val request = "Создай готовый веб-проект по описанию: $prompt. Верни только полный HTML-документ."
-      generationJob = scope.launch(modelDispatcher) {
-       try {
-        val output = StringBuilder()
-        checkNotNull(conversation).sendMessageAsync(request).collect { output.append(it.toString()) }
-        val result = output.toString().trim().removePrefix("```html").removePrefix("```").removeSuffix("```").trim()
-        require(result.contains("<html", true) || result.contains("<!doctype", true)) { "Модель не вернула HTML. Уточните запрос." }
-        withContext(Dispatchers.Main) { html = result; status = "Проект создан локально. Откройте «Просмотр»."; preview = true; busy = false; android.widget.Toast.makeText(ctx, "Проект успешно создан!", android.widget.Toast.LENGTH_LONG).show() }
-       } catch (e: CancellationException) {
-        withContext(Dispatchers.Main) { status = "Создание остановлено пользователем."; busy = false; generationJob = null }
-       } catch (e: Exception) {
-        withContext(Dispatchers.Main) { status = "Ошибка локальной генерации: ${e.message}"; busy = false; generationJob = null }
-       } finally {
-        withContext(Dispatchers.Main) { busy = false; generationJob = null }
-       }
+   }
+  } else {
+   LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    items(messages, key = { it.id }) { m ->
+     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.user) Arrangement.End else Arrangement.Start) {
+      Surface(color = if (m.user) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(18.dp), modifier = Modifier.widthIn(max = 330.dp)) {
+       Text(m.text, Modifier.padding(13.dp), color = if (m.user) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
       }
-     }, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Создаю…" else "Создать с ИИ") }
-     if (busy && generationJob != null) {
-      Spacer(Modifier.height(8.dp))
-      OutlinedButton(onClick = { generationJob?.cancel(); status = "Останавливаю создание…" }, modifier = Modifier.fillMaxWidth()) { Text("■ Стоп создания") }
-     }
-     Spacer(Modifier.height(8.dp))
-     Text(status, style = MaterialTheme.typography.bodySmall)
-     if (conversation == null) {
-      Spacer(Modifier.height(6.dp))
-      Text("Сначала откройте ⚙ и установите локальную модель. Регистрация не нужна.", style = MaterialTheme.typography.bodySmall)
      }
     }
    }
   }
  }
+ if (memoryDialog) AlertDialog(
+  onDismissRequest = { memoryDialog = false },
+  title = { Text("Память на устройстве • ${memory.size}") },
+  text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+   Text("Запомни: … — добавить факт. «Забудь всё» — очистить память.")
+   memory.forEachIndexed { i, item ->
+    Row(verticalAlignment = Alignment.CenterVertically) {
+     Text(item, Modifier.weight(1f))
+     IconButton(onClick = { memory = memory.toMutableList().also { it.removeAt(i) }; saveMemory() }) { Icon(Icons.Default.Delete, "Удалить") }
+    }
+    HorizontalDivider()
+   }
+   if (memory.isEmpty()) Text("Память пока пуста.")
+  } },
+  confirmButton = { TextButton(onClick = { memoryDialog = false }) { Text("Готово") } },
+  dismissButton = { TextButton(onClick = { memory = emptyList(); saveMemory() }) { Text("Очистить") } }
+ )
 }
+private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
+ val a = JSONArray(p.getString("messages", "[]"))
+ (0 until a.length()).map { val o = a.getJSONObject(it); Msg(o.getLong("id"), o.getString("text"), o.getBoolean("user")) }
+} catch (_: Exception) { emptyList() }
+private fun readMemory(p: android.content.SharedPreferences): List<String> = try {
+ val a = JSONArray(p.getString("memory", "[]")); (0 until a.length()).map { a.getString(it) }
+} catch (_: Exception) { emptyList() }
 
-
-/**
- * Resumable Hugging Face download. Keeps partial bytes after network failures and
- * continues with an HTTP Range request instead of restarting the 300+ MB file.
- */
-private suspend fun downloadModelResumable(
- url: String,
- tempFile: File,
- onProgress: suspend (Float) -> Unit
-) {
+private suspend fun downloadModelResumable(url: String, file: File, onProgress: suspend (Float) -> Unit) {
  var attempt = 0
- var totalBytes = -1L
- var lastError: Exception? = null
+ var total = -1L
+ var last: Exception? = null
  while (attempt < 8) {
   attempt++
-  val offset = if (tempFile.exists()) tempFile.length() else 0L
+  val offset = if (file.exists()) file.length() else 0L
   var connection: HttpURLConnection? = null
   try {
    connection = (URL(url).openConnection() as HttpURLConnection).apply {
-    connectTimeout = 45000
-    readTimeout = 180000
-    useCaches = false
-    instanceFollowRedirects = true
-    requestMethod = "GET"
-    setRequestProperty("User-Agent", "WebForge-AI-Android/1.1")
-    setRequestProperty("Accept", "application/octet-stream")
-    if (offset > 0L) setRequestProperty("Range", "bytes=${offset}-")
+    connectTimeout = 45000; readTimeout = 180000; instanceFollowRedirects = true
+    setRequestProperty("User-Agent", "WebForge-Local-Chat/1.0")
+    if (offset > 0) setRequestProperty("Range", "bytes=${offset}-")
    }
    connection.connect()
    val code = connection.responseCode
-   if (offset > 0L && code == HttpURLConnection.HTTP_OK) {
-    // Server/CDN ignored Range: restart cleanly rather than append duplicate bytes.
-    tempFile.delete()
-    totalBytes = -1L
-    connection.disconnect()
-    connection = null
-    continue
+   if (offset > 0 && code == HttpURLConnection.HTTP_OK) {
+    file.delete(); connection.disconnect(); connection = null; continue
    }
-   if (offset > 0L && code != 206) error("HTTP $code при попытке продолжить загрузку")
+   if (offset > 0 && code != 206) error("HTTP $code при продолжении")
    if (offset == 0L && code !in 200..299) error("HTTP $code")
    val range = connection.getHeaderField("Content-Range")
-   if (code == 206 && range != null) {
-    totalBytes = range.substringAfterLast('/').toLongOrNull() ?: totalBytes
-   } else if (offset == 0L) {
-    totalBytes = connection.contentLengthLong
-   }
-   java.io.FileOutputStream(tempFile, code == 206 && offset > 0L).buffered().use { output ->
+   if (code == 206 && range != null) total = range.substringAfterLast('/').toLongOrNull() ?: total
+   else if (offset == 0L) total = connection.contentLengthLong
+   java.io.FileOutputStream(file, code == 206 && offset > 0).buffered().use { out ->
     connection.inputStream.use { input ->
      val buffer = ByteArray(256 * 1024)
-     var downloaded = if (code == 206 && offset > 0L) offset else 0L
+     var got = if (code == 206 && offset > 0) offset else 0L
      while (true) {
-      val count = input.read(buffer)
-      if (count < 0) break
-      output.write(buffer, 0, count)
-      downloaded += count
-      if (totalBytes > 0L) onProgress((downloaded * 100f / totalBytes).coerceIn(0f, 99.9f))
+      val n = input.read(buffer); if (n < 0) break
+      out.write(buffer, 0, n); got += n
+      if (total > 0) onProgress((got * 100f / total).coerceIn(0f, 99.9f))
      }
-     output.flush()
     }
    }
-   if (totalBytes > 0L && tempFile.length() != totalBytes) {
-    throw java.io.IOException("Получено ${tempFile.length()} из $totalBytes байт")
-   }
-   if (tempFile.length() >= 850L * 1024L * 1024L) {
-    onProgress(100f)
-    connection.disconnect()
-    return
-   }
-   throw java.io.IOException("Загрузка завершилась раньше ожидаемого размера")
+   if (total > 0 && file.length() != total) error("Загружено ${file.length()} из $total байт")
+   if (file.length() >= 850L * 1024L * 1024L) { onProgress(100f); return }
+   error("Файл меньше ожидаемого размера")
   } catch (e: Exception) {
-   lastError = e
-   // Preserve the partial file. The next attempt resumes from its current length.
-   if (attempt < 8) kotlinx.coroutines.delay((attempt * 1500L).coerceAtMost(10000L))
-  } finally {
-   connection?.disconnect()
-  }
+   last = e
+   if (attempt < 8) delay((attempt * 1500L).coerceAtMost(10000L))
+  } finally { connection?.disconnect() }
  }
- throw java.io.IOException(
-  "Не удалось завершить загрузку после 8 попыток. Сохранено ${tempFile.length() / (1024 * 1024)} МБ; повторите позже — докачивание продолжится. ${lastError?.message ?: ""}",
-  lastError
- )
+ throw java.io.IOException("Загрузка не завершена; сохранено ${file.length() / 1048576} МБ. ${last?.message ?: ""}", last)
 }
-
-private fun defaultPage() = """<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Новый проект</title><style>body{font:16px system-ui;background:#111827;color:#f8fafc;padding:32px}main{max-width:760px;margin:auto}button{padding:12px 18px;border:0;border-radius:12px;background:#a78bfa;color:#111827}</style></head>
-<body><main><h1>Новый проект</h1><p>Выберите локальную модель и опишите, что нужно создать.</p><button onclick="alert('Проект работает')">Тестовая кнопка</button></main></body></html>"""
