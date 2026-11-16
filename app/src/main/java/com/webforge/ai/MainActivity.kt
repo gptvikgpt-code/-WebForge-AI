@@ -233,15 +233,15 @@ private fun ChatApp() {
       withContext(Dispatchers.Main) { status = "4B не запустилась — перешёл на быструю 1.7B." }
      }
      val replacementChat = checkNotNull(replacement).createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-      samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.58),
-      maxOutputToken = 768
+      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.58),
+      maxOutputToken = 512
      ))
      engine = replacement; chat = replacementChat; model = selectedFile
     }
     // Shorter context reduces prompt-prefill time on mobile hardware.
     // Conversation retains its own turns; re-sending them duplicates tokens and slows every request.
-    val relevantMemory = selectRelevantMemory(memory, text, 6)
+    val relevantMemory = selectRelevantMemory(memory, text, 4)
     val prompt = if (relevantMemory.isEmpty()) text else
      "Полезная память о пользователе (используй только по теме):\n" +
       relevantMemory.joinToString("\n") { "- $it" } + "\n\nЗапрос: $text"
@@ -288,9 +288,9 @@ private fun ChatApp() {
       Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
      }
      val convo = created.createConversation(ConversationConfig(
-      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
-      samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.58),
-      maxOutputToken = 768
+      systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+      samplerConfig = SamplerConfig(topK = 12, topP = 0.88, temperature = 0.58),
+      maxOutputToken = 512
      ))
      chat?.close(); engine?.close(); engine = created; chat = convo
      withContext(Dispatchers.Main) { status = "ИИ запущен локально"; busy = false; startingModel = false }
@@ -434,9 +434,9 @@ private fun ChatApp() {
         Engine(EngineConfig(modelPath = file.absolutePath, backend = Backend.CPU(threadCount = 4), cacheDir = ctx.cacheDir.absolutePath)).also { it.initialize() }
        }
        val convo = created.createConversation(ConversationConfig(
-        systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
+        systemInstruction = Contents.of("Ты личный локальный ИИ-собеседник. Общайся по-русски, естественно и точно. Сначала дай прямой ответ, не затягивай вступление и не повторяй запрос. Для простых вопросов отвечай кратко; для сложных задач объясняй по шагам. Если не уверен — прямо скажи. Учитывай память и контекст, не выдумывай факты. Память хранится приложением локально; не утверждай, что изменяешь веса нейросети."),
         samplerConfig = SamplerConfig(topK = 16, topP = 0.88, temperature = 0.62),
-        maxOutputToken = 768
+        maxOutputToken = 512
        ))
        chat?.close(); engine?.close(); engine = created; chat = convo
        withContext(Dispatchers.Main) { status = "ИИ запущен локально"; settings = false; busy = false }
