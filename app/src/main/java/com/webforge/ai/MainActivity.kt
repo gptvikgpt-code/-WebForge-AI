@@ -107,7 +107,7 @@ private fun ForgeApp() {
   }) },
   bottomBar = { NavigationBar {
    NavigationBarItem(selected = !preview && !showSettings, onClick = { preview = false; showSettings = false }, icon = { Icon(Icons.Default.Code, null) }, label = { Text("Создание") })
-   NavigationBarItem(selected = preview, onClick = { preview = true; settings = false }, icon = { Icon(Icons.Default.Preview, null) }, label = { Text("Просмотр") })
+   NavigationBarItem(selected = preview, onClick = { preview = true; showSettings = false }, icon = { Icon(Icons.Default.Preview, null) }, label = { Text("Просмотр") })
   } }
  ) { pad ->
   Column(Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
