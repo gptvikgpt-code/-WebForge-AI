@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -61,6 +62,8 @@ private fun ChatApp() {
  var settings by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
+ var downloadProgress by remember { mutableFloatStateOf(-1f) }
+ val partialModel = remember { File(ctx.filesDir, "webforge-model-1.7b.download") }
  val listState = rememberLazyListState()
  val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
   if (uri != null) scope.launch {
@@ -158,6 +161,35 @@ private fun ChatApp() {
     Text("Локальная модель", style = MaterialTheme.typography.headlineSmall)
     Text("Qwen3 1.7B в 4-битной квантовке. После установки модель отвечает прямо на телефоне, без API и аккаунта.")
     Spacer(Modifier.height(12.dp))
+
+    Button(
+     enabled = !busy && chat == null,
+     modifier = Modifier.fillMaxWidth(),
+     onClick = {
+      busy = true; downloadProgress = -1f; status = "Подключаюсь к Hugging Face…"
+      scope.launch {
+       try {
+        val target = withContext(Dispatchers.IO) {
+         val finalFile = File(ctx.filesDir, "webforge-model-1.7b.litertlm")
+         downloadModelResumable(
+          "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm?download=true",
+          partialModel
+         ) { p -> withContext(Dispatchers.Main) { downloadProgress = p } }
+         if (finalFile.exists()) finalFile.delete()
+         check(partialModel.renameTo(finalFile)) { "Не удалось сохранить модель" }
+         finalFile
+        }
+        model = target; status = "Модель скачана. Нажми «Запустить ИИ»."
+       } catch (e: Exception) { status = "Ошибка загрузки: ${e.message}. Частичный файл сохранён, повтори позже." }
+       finally { busy = false; downloadProgress = -1f }
+      }
+     }
+    ) { Text(if (partialModel.exists() && partialModel.length() > 0) "Продолжить загрузку модели" else "Скачать Qwen3 1.7B (≈932 МБ)") }
+    if (downloadProgress >= 0f) {
+     LinearProgressIndicator(progress = { downloadProgress / 100f }, modifier = Modifier.fillMaxWidth())
+     Text("${downloadProgress.toInt()}%")
+    }
+
     OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать файл модели .litertlm") }
     Text(model?.let { "Модель: ${it.name} • ${it.length() / 1048576} МБ" } ?: "Модель не установлена")
     Spacer(Modifier.height(12.dp))
@@ -233,3 +265,49 @@ private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try 
 private fun readMemory(p: android.content.SharedPreferences): List<String> = try {
  val a = JSONArray(p.getString("memory", "[]")); (0 until a.length()).map { a.getString(it) }
 } catch (_: Exception) { emptyList() }
+
+private suspend fun downloadModelResumable(url: String, file: File, onProgress: suspend (Float) -> Unit) {
+ var attempt = 0
+ var total = -1L
+ var last: Exception? = null
+ while (attempt < 8) {
+  attempt++
+  val offset = if (file.exists()) file.length() else 0L
+  var connection: HttpURLConnection? = null
+  try {
+   connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    connectTimeout = 45000; readTimeout = 180000; instanceFollowRedirects = true
+    setRequestProperty("User-Agent", "WebForge-Local-Chat/1.0")
+    if (offset > 0) setRequestProperty("Range", "bytes=${offset}-")
+   }
+   connection.connect()
+   val code = connection.responseCode
+   if (offset > 0 && code == HttpURLConnection.HTTP_OK) {
+    file.delete(); connection.disconnect(); connection = null; continue
+   }
+   if (offset > 0 && code != 206) error("HTTP $code при продолжении")
+   if (offset == 0L && code !in 200..299) error("HTTP $code")
+   val range = connection.getHeaderField("Content-Range")
+   if (code == 206 && range != null) total = range.substringAfterLast('/').toLongOrNull() ?: total
+   else if (offset == 0L) total = connection.contentLengthLong
+   java.io.FileOutputStream(file, code == 206 && offset > 0).buffered().use { out ->
+    connection.inputStream.use { input ->
+     val buffer = ByteArray(256 * 1024)
+     var got = if (code == 206 && offset > 0) offset else 0L
+     while (true) {
+      val n = input.read(buffer); if (n < 0) break
+      out.write(buffer, 0, n); got += n
+      if (total > 0) onProgress((got * 100f / total).coerceIn(0f, 99.9f))
+     }
+    }
+   }
+   if (total > 0 && file.length() != total) error("Загружено ${file.length()} из $total байт")
+   if (file.length() >= 850L * 1024L * 1024L) { onProgress(100f); return }
+   error("Файл меньше ожидаемого размера")
+  } catch (e: Exception) {
+   last = e
+   if (attempt < 8) delay((attempt * 1500L).coerceAtMost(10000L))
+  } finally { connection?.disconnect() }
+ }
+ throw java.io.IOException("Загрузка не завершена; сохранено ${file.length() / 1048576} МБ. ${last?.message ?: ""}", last)
+}
