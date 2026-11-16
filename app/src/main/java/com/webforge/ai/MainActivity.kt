@@ -204,9 +204,13 @@ private fun ChatApp() {
   status = if (fact != null) "Записал в память • думаю…" else "Думаю локально…"
   task = scope.launch(dispatcher) {
    try {
-    val recent = messages.dropLast(1).takeLast(4).joinToString("\n") { (if (it.user) "Ты: " else "ИИ: ") + it.text.take(600) }
-    val prompt = "Локальная память пользователя:\n" + memory.joinToString("\n") { "- $it" } +
-      "\n\nНедавний разговор:\n$recent\n\nСообщение пользователя:\n$text\n\nОтвечай на русском, кратко и естественно. Сразу отвечай по существу, не пересказывай вопрос и не повторяй предыдущие ответы. Не используй Markdown, звёздочки, LaTeX или знаки $. Пиши обычным читаемым текстом. Если пользователь спрашивает об улучшении голоса, объясни, что голос настраивается в синтезе речи Android, а не промптом к модели. Не выдумывай факты."
+    // Shorter context reduces prompt-prefill time on mobile hardware.
+    val recent = messages.dropLast(1).takeLast(2).joinToString("\n") {
+     (if (it.user) "Ты: " else "ИИ: ") + it.text.take(280)
+    }
+    val compactMemory = memory.takeLast(12).map { it.take(160) }
+    val prompt = "Память:\n" + compactMemory.joinToString("\n") { "- $it" } +
+      "\n\nПоследний контекст:\n$recent\n\nЗапрос:\n$text\n\nОтвечай по-русски, кратко и прямо. Не повторяй запрос и предыдущие ответы. Не используй Markdown или LaTeX. Не выдумывай факты."
     val result = StringBuilder()
     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
      val chunk = piece.toString()
@@ -227,7 +231,7 @@ private fun ChatApp() {
      if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
    } catch (e: CancellationException) {
-    withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Ответ остановлен.", false); saveChat() }
+    withContext(Dispatchers.Main) { messages = messages + Msg(System.currentTimeMillis(), "Генерация остановлена.", false); saveChat() }
    } catch (e: Exception) { withContext(Dispatchers.Main) { status = "Ошибка: ${e.message}" } }
    finally { withContext(Dispatchers.Main) { busy = false; task = null } }
   }
@@ -289,7 +293,11 @@ private fun ChatApp() {
    }
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
     LinearProgressIndicator(Modifier.weight(1f))
-    TextButton(onClick = { task?.cancel() }) { Text("Стоп") }
+    TextButton(onClick = {
+     status = "Останавливаю генерацию…"
+     try { tts?.stop() } catch (_: Exception) {}
+     try { task?.cancel(CancellationException("Stopped by user")) } catch (_: Exception) {}
+    }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
   } } }
  ) { pad ->
