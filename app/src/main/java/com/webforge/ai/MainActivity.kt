@@ -16,6 +16,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -530,6 +534,12 @@ private fun ChatApp() {
    }
   } else if (messages.isEmpty()) {
    Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+    Image(
+     painter = painterResource(id = R.drawable.ic_launcher),
+     contentDescription = null,
+     modifier = Modifier.fillMaxSize().padding(12.dp).alpha(0.16f),
+     contentScale = ContentScale.Fit
+    )
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
      Icon(Icons.Default.Memory, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
      Text("Твой локальный ИИ", style = MaterialTheme.typography.headlineSmall)
