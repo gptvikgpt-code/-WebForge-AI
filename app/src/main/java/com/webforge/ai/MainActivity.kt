@@ -89,6 +89,17 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+
+@Composable
+private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+ Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+  Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+   Text(value, style = MaterialTheme.typography.headlineSmall, color = Color(0xFF8BFF70))
+   Text(label, style = MaterialTheme.typography.labelMedium)
+  }
+ }
+}
+
 @Composable
 private fun ChatApp() {
  val ctx = LocalContext.current
@@ -416,8 +427,8 @@ private fun ChatApp() {
    IconButton(onClick = { selectedTab = "brain"; settings = true }) { Icon(Icons.Default.Settings, "Настройки") }
    IconButton(onClick = { messages = emptyList(); topicColorKey = "default"; prefs.edit().putString("topic_color", "default").apply(); saveChat() }) { Icon(Icons.Default.Delete, "Очистить чат") }
   }) },
-  bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(10.dp)) {
-   Row(verticalAlignment = Alignment.CenterVertically) {
+  bottomBar = { Surface(tonalElevation = 3.dp, modifier = Modifier.navigationBarsPadding()) { Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)) {
+   if (selectedTab == "chats") Row(verticalAlignment = Alignment.CenterVertically) {
     if (voiceMode) {
      Column(Modifier.weight(1f).padding(start = 12.dp)) {
       Text(if (listening) "Слушаю тебя…" else if (busy) "Готовлю ответ…" else "Голосовой режим", style = MaterialTheme.typography.bodyLarge)
@@ -461,9 +472,15 @@ private fun ChatApp() {
      activeWorkKind = ""
     }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+   NavigationBar(containerColor = Color(0xFF071109)) {
+    NavigationBarItem(selected = selectedTab == "chats", onClick = { selectedTab = "chats"; settings = false }, icon = { Icon(Icons.Default.Chat, null) }, label = { Text("Чаты") })
+    NavigationBarItem(selected = selectedTab == "brain", onClick = { selectedTab = "brain"; settings = true }, icon = { Icon(Icons.Default.Memory, null) }, label = { Text("Мозг") })
+    NavigationBarItem(selected = selectedTab == "plugins", onClick = { selectedTab = "plugins"; settings = false }, icon = { Icon(Icons.Default.Extension, null) }, label = { Text("Плагины") })
+    NavigationBarItem(selected = selectedTab == "stats", onClick = { selectedTab = "stats"; settings = false }, icon = { Icon(Icons.Default.BarChart, null) }, label = { Text("Статистика") })
+   }
   } } }
  ) { pad ->
-  if (settings) {
+  if (settings || selectedTab == "brain") {
    Column(Modifier.fillMaxSize().padding(pad).padding(18.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
     Text("Локальная модель", style = MaterialTheme.typography.headlineSmall)
     Text("Qwen3 1.7B в 4-битной квантовке. После установки модель отвечает прямо на телефоне, без API и аккаунта.")
@@ -590,19 +607,76 @@ private fun ChatApp() {
     Text("Если модель была загружена этим приложением, она уже выбрана автоматически. Импорт файла нужен только для модели из другого источника.")
     OutlinedButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("Назад в чат") }
    }
+  } else if (selectedTab == "plugins") {
+   Column(Modifier.fillMaxSize().padding(pad).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Text("Плагины", style = MaterialTheme.typography.headlineMedium)
+    Text("Инструменты работают на устройстве. Интернет-поиск в приложении отсутствует.")
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+      Icon(Icons.Default.Memory, null, tint = Color(0xFF69FF75), modifier = Modifier.size(34.dp))
+      Text("Распознавание изображений", style = MaterialTheme.typography.titleLarge)
+      Text("Выбери фотографию: локальный модуль определит доступные объекты и попробует прочитать текст на изображении.")
+      Button(onClick = { photoPicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth(), enabled = !photoBusy) { Text("Выбрать фотографию") }
+      if (photoBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+      if (photoUri != null) Text("Изображение выбрано", color = Color(0xFF8BFF70))
+      Text(photoResult, style = MaterialTheme.typography.bodyMedium)
+     }
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Icon(Icons.Default.Description, null, tint = Color(0xFF69FF75), modifier = Modifier.size(30.dp))
+      Text("Анализ документов", style = MaterialTheme.typography.titleLarge)
+      Text("Следующий локальный инструмент: чтение PDF и текстовых файлов без отправки данных в сеть.")
+      Text("В разработке", color = MaterialTheme.colorScheme.primary)
+     }
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Icon(Icons.Default.Memory, null, tint = Color(0xFF69FF75), modifier = Modifier.size(30.dp))
+      Text("Умная память", style = MaterialTheme.typography.titleLarge)
+      Text("Управляй фактами, которые помощник сохраняет локально.")
+      OutlinedButton(onClick = { memoryDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Открыть память") }
+     }
+    }
+   }
+  } else if (selectedTab == "stats") {
+   val answerCount = messages.count { !it.user && it.text.isNotBlank() }
+   val userCount = messages.count { it.user }
+   val modelBytes = model?.length() ?: 0L
+   Column(Modifier.fillMaxSize().padding(pad).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Text("Статистика", style = MaterialTheme.typography.headlineMedium)
+    Text("Фактические показатели этой установки и текущей переписки.")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+     StatCard("Сообщения", userCount.toString(), Modifier.weight(1f))
+     StatCard("Ответы ИИ", answerCount.toString(), Modifier.weight(1f))
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+     StatCard("Память", memory.size.toString(), Modifier.weight(1f))
+     StatCard("Размер модели", if (modelBytes > 0) "${modelBytes / 1048576} МБ" else "Нет", Modifier.weight(1f))
+    }
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
+     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text("Состояние системы", style = MaterialTheme.typography.titleMedium)
+      Text("Модель: ${model?.name ?: "не установлена"}")
+      Text("Движок: ${if (chat != null) "запущен" else "не запущен"}")
+      Text("Тема чата: $topicColorKey")
+      Text("Данные и память хранятся локально.")
+     }
+    }
+   }
   } else if (messages.isEmpty()) {
    Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
     Image(
      painter = painterResource(id = R.drawable.ic_launcher),
      contentDescription = null,
-     modifier = Modifier.fillMaxSize().padding(12.dp).alpha(0.16f),
-     contentScale = ContentScale.Fit
+     modifier = Modifier.fillMaxSize().alpha(0.38f),
+     contentScale = ContentScale.Crop
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
-     Icon(Icons.Default.Memory, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-     Text("Твой локальный ИИ", style = MaterialTheme.typography.headlineSmall)
-     Text("Общайся, исправляй ответы и сохраняй важное в память. Данные остаются на телефоне.", textAlign = TextAlign.Center)
-     Text("Попробуй: «Запомни: я работаю декоратором»", style = MaterialTheme.typography.bodySmall)
+     Icon(Icons.Default.Memory, null, modifier = Modifier.size(56.dp), tint = Color(0xFF69FF75))
+     Text("Твой локальный ИИ", style = MaterialTheme.typography.headlineSmall, color = Color.White)
+     Text("Общайся, исправляй ответы и сохраняй важное в память. Данные остаются на телефоне.", textAlign = TextAlign.Center, color = Color.White)
+     Text("Попробуй: «Запомни: я работаю декоратором»", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8BFF70))
     }
    }
   } else {
