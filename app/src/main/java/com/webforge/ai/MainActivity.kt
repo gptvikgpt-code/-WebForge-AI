@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
   Spacer(Modifier.height(8.dp));Text(status,style=MaterialTheme.typography.bodySmall)
  } else {
   Text("Предпросмотр",style=MaterialTheme.typography.titleLarge)
-  AndroidView(modifier=Modifier.fillMaxSize(),factory={ WebView(it).apply { settings.javaScriptEnabled=true;settings.domStorageEnabled=true;webViewClient=WebViewClient();loadDataWithBaseURL(null,html,"text/html","UTF-8",null) } },update={it.loadDataWithBaseURL(null,html,"text/html","UTF-8",null)})
+  AndroidView(modifier=Modifier.fillMaxSize(),factory={ WebView(it).apply { this.settings.javaScriptEnabled=true;this.settings.domStorageEnabled=true;webViewClient=WebViewClient();loadDataWithBaseURL(null,html,"text/html","UTF-8",null) } },update={it.loadDataWithBaseURL(null,html,"text/html","UTF-8",null)})
  }
  }
  }
