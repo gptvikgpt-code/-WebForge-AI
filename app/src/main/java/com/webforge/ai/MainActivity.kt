@@ -76,6 +76,7 @@ private fun ChatApp() {
  var busy by remember { mutableStateOf(false) }
  var startingModel by remember { mutableStateOf(false) }
  var settings by remember { mutableStateOf(false) }
+ var clearCacheDialog by remember { mutableStateOf(false) }
  var memoryDialog by remember { mutableStateOf(false) }
  var task by remember { mutableStateOf<Job?>(null) }
  var activeWorkKind by remember { mutableStateOf("") }
@@ -471,6 +472,17 @@ private fun ChatApp() {
     OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Выбрать файл модели .litertlm") }
     Text(model?.let { "Модель: ${it.name} • ${it.length() / 1048576} МБ" } ?: "Модель не установлена")
     Text("Файл хранится во внутренней памяти приложения. Искать его в папке «Загрузки» не нужно.")
+    Spacer(Modifier.height(18.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+    Spacer(Modifier.height(12.dp))
+    Text("Хранилище", style = MaterialTheme.typography.titleMedium)
+    val cacheBytes = ctx.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    Text("Временный кеш: ${cacheBytes / 1048576} МБ. Модели и история чата хранятся отдельно.")
+    OutlinedButton(
+     enabled = !busy,
+     onClick = { clearCacheDialog = true },
+     modifier = Modifier.fillMaxWidth()
+    ) { Text("Очистить временный кеш") }
     Spacer(Modifier.height(12.dp))
     if (chat != null) {
      Text("Модель уже запущена и готова к работе.", color = MaterialTheme.colorScheme.primary)
@@ -523,6 +535,25 @@ private fun ChatApp() {
    }
   }
  }
+ if (clearCacheDialog) AlertDialog(
+  onDismissRequest = { clearCacheDialog = false },
+  title = { Text("Очистить временный кеш?") },
+  text = { Text("Удалятся только временные файлы. Скачанные модели, незавершённые загрузки и история чата останутся на месте.") },
+  confirmButton = {
+   TextButton(onClick = {
+    val removed = try {
+     ctx.cacheDir.listFiles()?.sumOf { file ->
+      val size = file.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+      file.deleteRecursively()
+      size
+     } ?: 0L
+    } catch (_: Exception) { 0L }
+    status = "Временный кеш очищен • ${removed / 1048576} МБ освобождено"
+    clearCacheDialog = false
+   }) { Text("Очистить") }
+  },
+  dismissButton = { TextButton(onClick = { clearCacheDialog = false }) { Text("Отмена") } }
+ )
  if (memoryDialog) AlertDialog(
   onDismissRequest = { memoryDialog = false },
   title = { Text("Память на устройстве • ${memory.size}") },
