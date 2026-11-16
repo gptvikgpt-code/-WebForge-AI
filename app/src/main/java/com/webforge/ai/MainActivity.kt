@@ -162,8 +162,8 @@ private fun ChatApp() {
   if (ttsReady) tts?.let { speaker ->
    val result = speaker.setLanguage(Locale("ru", "RU"))
    if (result >= TextToSpeech.LANG_AVAILABLE) {
-    speaker.setSpeechRate(0.94f)
-    speaker.setPitch(0.92f)
+    speaker.setSpeechRate(1.04f)
+    speaker.setPitch(1.0f)
     val russianVoice = speaker.voices?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality }
     if (russianVoice != null) speaker.voice = russianVoice
    }
@@ -206,12 +206,23 @@ private fun ChatApp() {
    try {
     val recent = messages.dropLast(1).takeLast(4).joinToString("\n") { (if (it.user) "Ты: " else "ИИ: ") + it.text.take(600) }
     val prompt = "Локальная память пользователя:\n" + memory.joinToString("\n") { "- $it" } +
-      "\n\nНедавний разговор:\n$recent\n\nСообщение пользователя:\n$text\n\nОтвечай на русском, учитывай память и контекст. Не выдумывай факты."
+      "\n\nНедавний разговор:\n$recent\n\nСообщение пользователя:\n$text\n\nОтвечай на русском, кратко и естественно. Сразу отвечай по существу, не пересказывай вопрос и не повторяй предыдущие ответы. Не используй Markdown, звёздочки, LaTeX или знаки $. Пиши обычным читаемым текстом. Если пользователь спрашивает об улучшении голоса, объясни, что голос настраивается в синтезе речи Android, а не промптом к модели. Не выдумывай факты."
     val result = StringBuilder()
-    checkNotNull(chat).sendMessageAsync(prompt).collect { result.append(it.toString()) }
+    checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
+     val chunk = piece.toString()
+     when {
+      chunk.isBlank() -> Unit
+      result.isEmpty() -> result.append(chunk)
+      chunk.startsWith(result.toString()) -> { result.setLength(0); result.append(chunk) }
+      else -> result.append(chunk)
+     }
+    }
     withContext(Dispatchers.Main) {
-     val answer = result.toString().trim().ifBlank { "Пустой ответ модели." }
-     messages = messages + Msg(System.currentTimeMillis(), answer, false)
+     val answer = cleanModelText(result.toString()).ifBlank { "Модель не сформировала ответ. Попробуй переформулировать запрос." }
+     val previous = messages.lastOrNull()
+     if (previous == null || previous.user || cleanModelText(previous.text) != answer) {
+      messages = messages + Msg(System.currentTimeMillis(), answer, false)
+     }
      saveChat(); status = "Локальный режим • записей памяти: ${memory.size}"
      if (voiceMode) tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "webforge-answer")
     }
@@ -388,6 +399,11 @@ private fun ChatApp() {
   dismissButton = { TextButton(onClick = { memory = emptyList(); saveMemory() }) { Text("Очистить") } }
  )
 }
+private fun cleanModelText(source: String): String {
+ return source.trim().replace("```", "").replace("\\times", "×")
+  .replace("\\cdot", "·").replace("**", "").replace("*", "").replace("$", "").trim()
+}
+
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
  val a = JSONArray(p.getString("messages", "[]"))
  (0 until a.length()).map { val o = a.getJSONObject(it); Msg(o.getLong("id"), o.getString("text"), o.getBoolean("user")) }
