@@ -568,7 +568,7 @@ private fun ChatApp() {
      activeWorkKind = ""
     }) { Text("Стоп") }
    } else Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
-   NavigationBar(containerColor = Color(0xCC252B27), tonalElevation = 0.dp) {
+   NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
     NavigationBarItem(selected = selectedTab == "chats", onClick = { selectedTab = "chats"; settings = false }, icon = { Icon(Icons.Default.Chat, null) }, label = { Text("Чаты") })
     NavigationBarItem(selected = selectedTab == "brain", onClick = { selectedTab = "brain"; settings = true }, icon = { Icon(Icons.Default.Memory, null) }, label = { Text("Мозг") })
     NavigationBarItem(selected = selectedTab == "plugins", onClick = { selectedTab = "plugins"; settings = false }, icon = { Icon(Icons.Default.Extension, null) }, label = { Text("Плагины") })
