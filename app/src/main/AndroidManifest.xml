@@ -4,6 +4,8 @@
     <application
         android:allowBackup="false"
         android:label="WebForge AI"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
