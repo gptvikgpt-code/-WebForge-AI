@@ -373,7 +373,7 @@ private fun ChatApp() {
     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
     .build())
    val languageResult = speaker.setLanguage(Locale("ru", "RU"))
-   speaker.setSpeechRate(1.10f)
+   speaker.setSpeechRate(1.0f)
    speaker.setPitch(1.0f)
    val russianVoice = speaker.voices
     ?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }
