@@ -58,7 +58,7 @@ private fun ForgeApp() {
  var status by remember { mutableStateOf(if (modelFile != null) "Локальная модель найдена. Нажмите «Загрузить модель»." else "Выберите локальную модель .litertlm. Регистрация и API-ключ не нужны.") }
  var busy by remember { mutableStateOf(false) }
  var preview by remember { mutableStateOf(false) }
- var settings by remember { mutableStateOf(false) }
+ var showSettings by remember { mutableStateOf(false) }
 
  val openModel = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
   if (uri != null) {
@@ -103,16 +103,16 @@ private fun ForgeApp() {
 
  Scaffold(
   topBar = { TopAppBar(title = { Text("WebForge AI") }, actions = {
-   IconButton(onClick = { settings = !settings; preview = false }) { Icon(Icons.Default.Settings, contentDescription = "Модель") }
+   IconButton(onClick = { showSettings = !showSettings; preview = false }) { Icon(Icons.Default.Settings, contentDescription = "Модель") }
   }) },
   bottomBar = { NavigationBar {
-   NavigationBarItem(selected = !preview && !settings, onClick = { preview = false; settings = false }, icon = { Icon(Icons.Default.Code, null) }, label = { Text("Создание") })
+   NavigationBarItem(selected = !preview && !showSettings, onClick = { preview = false; showSettings = false }, icon = { Icon(Icons.Default.Code, null) }, label = { Text("Создание") })
    NavigationBarItem(selected = preview, onClick = { preview = true; settings = false }, icon = { Icon(Icons.Default.Preview, null) }, label = { Text("Просмотр") })
   } }
  ) { pad ->
   Column(Modifier.fillMaxSize().padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
    when {
-    settings -> {
+    showSettings -> {
      Text("Локальный ИИ", style = MaterialTheme.typography.headlineSmall)
      Spacer(Modifier.height(8.dp))
      Text("Модель работает прямо на телефоне. Аккаунт, API-ключ и платная подписка не требуются. Модель скачивается отдельно и хранится на устройстве.")
