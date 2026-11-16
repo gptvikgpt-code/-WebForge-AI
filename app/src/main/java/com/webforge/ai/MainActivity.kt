@@ -533,13 +533,30 @@ private fun ChatApp() {
     } else {
      OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Напиши сообщение…") }, maxLines = 5, enabled = !busy, shape = RoundedCornerShape(22.dp))
     }
-    IconButton(onClick = {
-     voiceMode = !voiceMode
-     prefs.edit().putBoolean("voice_mode", voiceMode).apply()
-     if (voiceMode) { tts?.stop(); beginVoiceInput() }
-     else { try { speechRecognizer?.cancel() } catch (_: Exception) {}; listening = false; tts?.stop(); status = "Текстовый режим" }
-    }) { Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.GraphicEq, if (voiceMode) "Переключить на текст" else "Переключить на голос") }
-    if (!voiceMode) IconButton(onClick = { send() }, enabled = input.isNotBlank() && !busy) { Icon(Icons.Default.Send, "Отправить") }
+    FilledIconButton(
+     onClick = {
+      voiceMode = !voiceMode
+      prefs.edit().putBoolean("voice_mode", voiceMode).apply()
+      if (voiceMode) { tts?.stop(); beginVoiceInput() }
+      else { try { speechRecognizer?.cancel() } catch (_: Exception) {}; listening = false; tts?.stop(); status = "Текстовый режим" }
+     },
+     colors = IconButtonDefaults.filledIconButtonColors(
+      containerColor = Color(0xFF35383E),
+      contentColor = Color(0xFFD2D4D8),
+      disabledContainerColor = Color(0xFF292C31),
+      disabledContentColor = Color(0xFF777B82)
+     )
+    ) { Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.GraphicEq, if (voiceMode) "Переключить на текст" else "Переключить на голос") }
+    if (!voiceMode) FilledIconButton(
+     onClick = { send() },
+     enabled = input.isNotBlank() && !busy,
+     colors = IconButtonDefaults.filledIconButtonColors(
+      containerColor = Color(0xFF35383E),
+      contentColor = Color(0xFFD2D4D8),
+      disabledContainerColor = Color(0xFF292C31),
+      disabledContentColor = Color(0xFF777B82)
+     )
+    ) { Icon(Icons.Default.Send, "Отправить") }
    }
    if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
     LinearProgressIndicator(Modifier.weight(1f))
