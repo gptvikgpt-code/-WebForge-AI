@@ -110,23 +110,6 @@ private fun ChatApp() {
   tts = speaker
   onDispose { try { speaker.stop(); speaker.shutdown() } catch (_: Exception) {}; tts = null; ttsReady = false }
  }
- LaunchedEffect(ttsReady) {
-  if (ttsReady) tts?.let { speaker ->
-   val result = speaker.setLanguage(Locale("ru", "RU"))
-   if (result >= TextToSpeech.LANG_AVAILABLE) {
-    speaker.setSpeechRate(0.94f)
-    speaker.setPitch(0.92f)
-    val russianVoice = speaker.voices?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality }
-    if (russianVoice != null) speaker.voice = russianVoice
-   }
-   speaker.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-    override fun onStart(utteranceId: String?) {}
-    override fun onDone(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
-    @Deprecated("Deprecated in Java")
-    override fun onError(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
-   })
-  }
- }
  DisposableEffect(Unit) {
   onDispose {
    try { speechRecognizer?.destroy() } catch (_: Exception) {}
@@ -174,6 +157,23 @@ private fun ChatApp() {
     recognizer.startListening(intent); listening = true
    } else micPermission.launch(Manifest.permission.RECORD_AUDIO)
   } catch (e: Exception) { listening = false; status = "Ошибка микрофона: ${e.message}" }
+ }
+ LaunchedEffect(ttsReady) {
+  if (ttsReady) tts?.let { speaker ->
+   val result = speaker.setLanguage(Locale("ru", "RU"))
+   if (result >= TextToSpeech.LANG_AVAILABLE) {
+    speaker.setSpeechRate(0.94f)
+    speaker.setPitch(0.92f)
+    val russianVoice = speaker.voices?.filter { it.locale.language == "ru" && !it.isNetworkConnectionRequired }?.maxByOrNull { it.quality }
+    if (russianVoice != null) speaker.voice = russianVoice
+   }
+   speaker.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+    override fun onStart(utteranceId: String?) {}
+    override fun onDone(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+    @Deprecated("Deprecated in Java")
+    override fun onError(utteranceId: String?) { ctx.mainExecutor.execute { if (voiceMode && !busy) beginVoiceInput() } }
+   })
+  }
  }
  fun send() {
   val text = input.trim()
