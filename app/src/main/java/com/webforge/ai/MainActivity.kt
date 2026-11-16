@@ -722,6 +722,10 @@ private fun ChatApp() {
      StatCard("Память", memory.size.toString(), Modifier.weight(1f))
      StatCard("Размер модели", if (modelBytes > 0) "${modelBytes / 1048576} МБ" else "Нет", Modifier.weight(1f))
     }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+     StatCard("Чатов", threads.size.toString(), Modifier.weight(1f))
+     StatCard("Фотоанализ", "Локально", Modifier.weight(1f))
+    }
     Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF102516))) {
      Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
       Text("Состояние системы", style = MaterialTheme.typography.titleMedium)
