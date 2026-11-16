@@ -43,8 +43,8 @@ class MainActivity : ComponentActivity() {
 private fun ForgeApp() {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("forge", 0) }
-    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "https://api.openai.com/v1/chat/completions") ?: "") }
-    var model by remember { mutableStateOf(prefs.getString("model", "gpt-4o-mini") ?: "") }
+    var endpoint by remember { mutableStateOf(prefs.getString("endpoint", "https://openrouter.ai/api/v1/chat/completions") ?: "") }
+    var model by remember { mutableStateOf(prefs.getString("model", "openrouter/free") ?: "") }
     var key by remember { mutableStateOf(prefs.getString("key", "") ?: "") }
     var prompt by remember { mutableStateOf("") }
     var html by remember { mutableStateOf("<!doctype html><html><meta name='viewport' content='width=device-width, initial-scale=1'><body style='background:#101827;color:white;font:18px sans-serif;padding:30px'><h1>WebForge AI</h1><p>Опишите свой проект.</p></body></html>") }
@@ -75,7 +75,18 @@ private fun ForgeApp() {
                 settings -> {
                     Text("Подключение ИИ", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(8.dp))
-                    Text("Для генерации нужен API-ключ выбранного провайдера. Подписка ChatGPT сама по себе не является API-ключом.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Рекомендуемый бесплатный вариант: OpenRouter Free. Он направляет запросы на доступные бесплатные модели. У бесплатных моделей есть дневные и минутные лимиты.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            endpoint = "https://openrouter.ai/api/v1/chat/completions"
+                            model = "openrouter/free"
+                            status = "Выбран бесплатный маршрутизатор OpenRouter. Создайте бесплатный API-ключ на openrouter.ai."
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Выбрать бесплатный OpenRouter") }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Другие совместимые сервисы можно подключить вручную. API-ключ создаётся в личном кабинете провайдера. Подписка ChatGPT не является API-ключом.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = endpoint, onValueChange = { endpoint = it },
@@ -133,8 +144,8 @@ private fun ForgeApp() {
                     AndroidView(
                         modifier = Modifier.fillMaxWidth().heightIn(min = 500.dp),
                         factory = { WebView(it).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
+                            this.settings.javaScriptEnabled = true
+                            this.settings.domStorageEnabled = true
                             webViewClient = WebViewClient()
                             loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
                         } },
