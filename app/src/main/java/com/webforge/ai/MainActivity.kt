@@ -462,7 +462,9 @@ private fun ChatApp() {
     val prompt = text
     val result = StringBuilder()
     var lastUiLength = 0
-    checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
+    // Bound native inference so a stalled model cannot leave the chat busy forever.
+    withTimeout(90_000L) {
+     checkNotNull(chat).sendMessageAsync(prompt).collect { piece ->
      val chunk = piece.toString()
      when {
       chunk.isBlank() -> Unit
@@ -482,6 +484,7 @@ private fun ChatApp() {
       }
       lastUiLength = liveText.length
      }
+     }
     }
     // A completed but empty stream is not a valid answer. Rebuild the conversation
     // from the history before this turn and retry once, without duplicating the user message.
@@ -491,13 +494,15 @@ private fun ChatApp() {
      try { chat?.close() } catch (_: Exception) {}
      chat = retryConversation
      val retryResult = StringBuilder()
-     retryConversation.sendMessageAsync(prompt).collect { piece ->
+     withTimeout(60_000L) {
+      retryConversation.sendMessageAsync(prompt).collect { piece ->
       val chunk = piece.toString()
       when {
        chunk.isBlank() -> Unit
        retryResult.isEmpty() -> retryResult.append(chunk)
        chunk.startsWith(retryResult.toString()) -> { retryResult.setLength(0); retryResult.append(chunk) }
        else -> retryResult.append(chunk)
+      }
       }
      }
      result.setLength(0)
@@ -519,6 +524,15 @@ private fun ChatApp() {
        if (speakResult == TextToSpeech.ERROR) status = "Не удалось запустить озвучку. Проверь синтез речи Android."
       } else pendingAnswerSpeech = answer
      }
+    }
+   } catch (e: TimeoutCancellationException) {
+    withContext(Dispatchers.Main) {
+     val answer = "Локальная модель не ответила за отведённое время. Проверь файл модели и перезапусти ИИ в разделе «Мозг». Запрос сохранён — отправь его повторно."
+     val last = messages.lastOrNull()
+     messages = if (last?.id == responseId) messages.dropLast(1) + Msg(responseId, answer, false)
+      else messages + Msg(responseId, answer, false)
+     saveChat()
+     status = "Тайм-аут генерации. Модель не вернула ответ."
     }
    } catch (e: CancellationException) {
     withContext(Dispatchers.Main) {
