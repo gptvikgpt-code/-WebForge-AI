@@ -998,13 +998,28 @@ private fun writeThreads(threads: List<ChatThread>): String {
 }
 
 private fun createLocalConversation(engine: Engine, history: List<Msg>): Conversation {
- val transcript = history.takeLast(14).joinToString("\n") { if (it.user) "Пользователь: ${it.text}" else "Ассистент: ${it.text}" }
+ // Keep only the latest four exchanges in the prompt. Older messages remain saved in chat history.
+ // This bounds prefill work on mobile without deleting any conversation data.
+ val transcript = history.takeLast(8).joinToString("\n") {
+  val messageText = it.text.take(1200)
+  if (it.user) "Пользователь: $messageText" else "Ассистент: $messageText"
+ }
  val instruction = "Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики. Выполняй просьбу пользователя, не отвечай пустыми подтверждениями, не повторяй одну и ту же мысль. Отвечай естественным русским языком, будь точным и не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели." +
   if (transcript.isNotBlank()) "\n\nКонтекст именно этой переписки (не смешивай его с другими чатами):\n" + transcript else ""
  val lastUserMessage = history.lastOrNull { it.user }?.text.orEmpty()
- val outputLimit = if (isComplexPrompt(lastUserMessage)) 1024 else 640
- val responseGuidance = " Отвечай естественно и содержательно: длину выбирай по сложности задачи. Для простого вопроса достаточно краткого ответа; для инструкции, анализа, программирования и сложной задачи раскрывай шаги, важные ограничения и проверку результата. Не обрывай полезное объяснение ради искусственного лимита в 2–4 предложения. Сначала дай прямой ответ, затем структуру и детали. Если данных недостаточно — обозначь неопределённость, не выдумывай."
- return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + responseGuidance), samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.65), maxOutputToken = outputLimit))
+ val complex = isComplexPrompt(lastUserMessage)
+ // Qwen3 enables unlimited hidden reasoning by default. It consumes the output-token
+ // budget before the user-facing answer and can make short prompts appear to hang.
+ val outputLimit = if (complex) 768 else 256
+ val responseGuidance = " Отвечай естественно и содержательно: длину выбирай по сложности задачи. Для простого вопроса достаточно краткого ответа; для инструкции, анализа, программирования и сложной задачи раскрывай шаги, важные ограничения и проверку результата. Сначала дай прямой ответ, затем структуру и детали. Если данных недостаточно — обозначь неопределённость, не выдумывай."
+ return engine.createConversation(
+  ConversationConfig(
+   systemInstruction = Contents.of(instruction + responseGuidance),
+   samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.65),
+   maxOutputToken = outputLimit,
+   thinkingConfig = ThinkingConfig(enableThinking = false, thinkingTokenBudget = 0)
+  )
+ )
 }
 
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
