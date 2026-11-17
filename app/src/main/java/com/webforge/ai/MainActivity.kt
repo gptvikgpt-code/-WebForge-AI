@@ -987,7 +987,10 @@ private fun createLocalConversation(engine: Engine, history: List<Msg>): Convers
  val transcript = history.takeLast(14).joinToString("\n") { if (it.user) "Пользователь: ${it.text}" else "Ассистент: ${it.text}" }
  val instruction = "Ты полноценный диалоговый ИИ-помощник. Внимательно понимай смысл последнего сообщения и учитывай предыдущие реплики. Выполняй просьбу пользователя, не отвечай пустыми подтверждениями, не повторяй одну и ту же мысль. Отвечай естественным русским языком, будь точным и не выдумывай факты. Не утверждай, что самостоятельно обучаешь веса модели." +
   if (transcript.isNotBlank()) "\n\nКонтекст именно этой переписки (не смешивай его с другими чатами):\n" + transcript else ""
- return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + " Отвечай по существу, обычно 2–4 предложениями, без длинных вступлений; сначала дай прямой ответ, затем важные детали. Не повторяй вопрос."), samplerConfig = SamplerConfig(topK = 8, topP = 0.86, temperature = 0.60), maxOutputToken = 256))
+ val lastUserMessage = history.lastOrNull { it.user }?.text.orEmpty()
+ val outputLimit = if (isComplexPrompt(lastUserMessage)) 1024 else 640
+ val responseGuidance = " Отвечай естественно и содержательно: длину выбирай по сложности задачи. Для простого вопроса достаточно краткого ответа; для инструкции, анализа, программирования и сложной задачи раскрывай шаги, важные ограничения и проверку результата. Не обрывай полезное объяснение ради искусственного лимита в 2–4 предложения. Сначала дай прямой ответ, затем структуру и детали. Если данных недостаточно — обозначь неопределённость, не выдумывай."
+ return engine.createConversation(ConversationConfig(systemInstruction = Contents.of(instruction + responseGuidance), samplerConfig = SamplerConfig(topK = 16, topP = 0.90, temperature = 0.65), maxOutputToken = outputLimit))
 }
 
 private fun readMessages(p: android.content.SharedPreferences): List<Msg> = try {
